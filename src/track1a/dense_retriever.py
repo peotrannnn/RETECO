@@ -37,13 +37,21 @@ import os
 import numpy as np
 
 
-def _cache_key(model_name, doc_ids, max_seq_length):
-    """Fingerprint a (model, corpus, truncation) triple so cached embeddings
-    are only reused when all three match. Domain corpora are frozen release
-    files, so count + first id + last id is enough to detect corpus change.
+def _cache_key(model_name, doc_ids, max_seq_length, passage_prefix):
+    """Fingerprint everything that changes the encoded corpus, so cached
+    embeddings are only reused when all of it matches.
+
+    All four inputs alter the vectors: the model, the truncation length, the
+    corpus itself, and the passage prefix some models require. Leaving any of
+    them out means silently reusing embeddings that no longer correspond to
+    the current configuration -- a wrong answer that raises no error.
+
+    Domain corpora are frozen release files, so document count plus the first
+    and last id is enough to detect a corpus change (including deduplication,
+    which alters the count).
     """
     h = hashlib.sha1()
-    h.update(f"{model_name}|{max_seq_length}|{len(doc_ids)}".encode("utf-8"))
+    h.update(f"{model_name}|{max_seq_length}|{passage_prefix}|{len(doc_ids)}".encode("utf-8"))
     if doc_ids:
         h.update(doc_ids[0].encode("utf-8"))
         h.update(doc_ids[-1].encode("utf-8"))
@@ -86,7 +94,8 @@ class DenseRetriever:
         cache_path = None
         if cache_dir:
             os.makedirs(cache_dir, exist_ok=True)
-            key = _cache_key(model_name, self.doc_ids, self.doc_max_seq_length)
+            key = _cache_key(model_name, self.doc_ids, self.doc_max_seq_length,
+                             self.passage_prefix)
             cache_path = os.path.join(cache_dir, f"corpus_{key}.npy")
 
         if cache_path and os.path.isfile(cache_path):
@@ -100,25 +109,68 @@ class DenseRetriever:
                       f"(fp16={self.use_fp16}, doc_max_seq_length={self.doc_max_seq_length}, "
                       f"query_max_seq_length={self.query_max_seq_length}, "
                       f"batch_size={batch_size})", flush=True)
-            texts = [f"{self.passage_prefix}{t or ''}" for t in doc_texts]
-            emb = self.model.encode(
-                texts,
+            emb = self._encode_corpus(doc_texts, batch_size, verbose)
+            if cache_path:
+                np.save(cache_path, emb)          # stored as float16
+            self.embeddings = emb.astype("float32")
+            del emb
+
+        # A zero-width array means an empty corpus; faiss cannot index that and
+        # the numpy fallback cannot multiply by it, so search() short-circuits.
+        self._index = None
+        if self.embeddings.size:
+            try:
+                import faiss
+                self._index = faiss.IndexFlatIP(self.embeddings.shape[1])
+                self._index.add(self.embeddings)
+            except ImportError:
+                pass  # numpy fallback in search()
+
+    def _encode_corpus(self, doc_texts, batch_size, verbose, chunk_size=20_000):
+        """Encode the corpus in chunks, straight into a preallocated float16
+        array.
+
+        Encoding the corpus in one call is what kills the largest domains.
+        `history` holds 356k documents (~1.3 GB of text), and a single call
+        would hold, at once: the corpus list, a second copy of it carrying the
+        passage prefix, sentence-transformers' own per-batch result list, and
+        the stacked output array. On a machine with ~13 GB of RAM that is an
+        out-of-memory kill, which surfaces as SIGKILL rather than a Python
+        traceback.
+
+        Chunking caps the peak at one chunk of text plus one chunk of vectors
+        plus the final array, and the prefix copy is built per chunk -- and
+        skipped entirely when the prefix is empty, which is the default.
+        """
+        n = len(doc_texts)
+        # The output array is allocated from the first chunk's width rather
+        # than queried from the model, so this does not depend on any
+        # particular sentence-transformers API surface.
+        out = None
+
+        for start in range(0, n, chunk_size):
+            chunk = doc_texts[start:start + chunk_size]
+            if self.passage_prefix:
+                chunk = [f"{self.passage_prefix}{t or ''}" for t in chunk]
+            vectors = self.model.encode(
+                chunk,
                 batch_size=batch_size,
-                show_progress_bar=verbose,
+                show_progress_bar=False,
                 normalize_embeddings=True,
                 convert_to_numpy=True,
             )
-            if cache_path:
-                np.save(cache_path, emb.astype("float16"))
-            self.embeddings = emb.astype("float32")
+            if out is None:
+                out = np.empty((n, vectors.shape[1]), dtype="float16")
+            out[start:start + len(chunk)] = vectors.astype("float16")
+            del chunk, vectors
+            if verbose:
+                done = min(start + chunk_size, n)
+                print(f"    encoded {done:,}/{n:,} documents "
+                      f"({done/n*100:.0f}%)", flush=True)
 
-        self._index = None
-        try:
-            import faiss
-            self._index = faiss.IndexFlatIP(self.embeddings.shape[1])
-            self._index.add(self.embeddings)
-        except ImportError:
-            pass  # numpy fallback in search()
+        if out is None:                      # empty corpus
+            out = np.empty((0, 0), dtype="float16")
+        return out
 
     def encode_query(self, query):
         q_text = f"{self.query_prefix}{query or ''}"
@@ -135,6 +187,12 @@ class DenseRetriever:
             self.model.max_seq_length = self.doc_max_seq_length
 
     def search(self, query, top_k=100):
+        # Empty corpus: nothing to rank. Reachable when a caller passes a
+        # filtered or subsetted corpus (deduplication, a domain slice), so it
+        # returns cleanly instead of raising out of the matmul below.
+        if not self.doc_ids:
+            return []
+
         q_emb = self.encode_query(query)
 
         if self._index is not None:

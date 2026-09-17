@@ -32,9 +32,66 @@ Examples:
 
 import argparse
 import json
+import re
 from pathlib import Path
 
-from retriever import Retriever
+from retriever import Retriever, TOKENIZERS, DEFAULT_TOKENIZER
+
+
+# --------------------------------------------------------------------------
+# Query forms
+#
+# Queries in this dataset are whole Stack Exchange posts: a short title
+# followed by a much longer body. Measured on the release, the body runs
+# 4.8-18.0x the length of the title, and every query carries HTML markup that
+# no document in the corpus contains.
+#
+# Measured over all 13 domains (1,211 train queries), macro nDCG@10 / R@100:
+#
+#     raw              0.0719 / 0.1995   <- the starter kit's construction
+#     stripped         0.0905 / 0.2402
+#     title-weighted   0.1139 / 0.2876
+#     title            0.1316 / 0.3382   <- best recall, on 10 of 13 domains
+#
+# Two different winners, and which one is right depends on what comes next:
+# `title` maximises RECALL, which is the hard cap on any reranker, while
+# `title-weighted` maximises nDCG@10 on its own. Combined with the tokenizer
+# (see below) the ordering flips again, which is why the combination was
+# measured rather than assumed.
+#
+# Retrieving with the title alone was measured to raise recall@100 by a factor
+# alone changed little -- the body, not the markup, is what dilutes the
+# information need.
+#
+# The chosen form is applied ONCE, right after loading, so every stage
+# downstream (lexical, dense, fusion, reranking) sees the same query text.
+# --------------------------------------------------------------------------
+_HTML_TAG = re.compile(r"<[^>]+>")
+_HTML_ENTITY = re.compile(r"&(quot|amp|lt|gt|nbsp|#\d+);")
+
+
+def strip_markup(text):
+    text = _HTML_TAG.sub(" ", text)
+    text = _HTML_ENTITY.sub(" ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def title_of(query):
+    """The title is everything before the first <p>; the rest is the body."""
+    m = re.search(r"<p>", query)
+    return query[:m.start()] if m else query
+
+
+QUERY_FORMS = {
+    # the starter kit's construction: the post exactly as published
+    "raw":            lambda q: q,
+    # same text, markup removed
+    "stripped":       lambda q: strip_markup(q),
+    # the condensed information need, nothing else
+    "title":          lambda q: strip_markup(title_of(q)),
+    # title up-weighted but the body retained as context
+    "title-weighted": lambda q: strip_markup((title_of(q) + " ") * 3 + q),
+}
 
 
 def read_jsonl(path):
@@ -53,11 +110,13 @@ def load_corpus(path):
     return ids, texts
 
 
-def load_queries(path):
+def load_queries(path, form="raw"):
+    """Topic id is item["id"]; the query text is item["query"], reshaped by
+    the chosen query form (see QUERY_FORMS). The topic id is never altered --
+    it must match the qrels exactly."""
+    transform = QUERY_FORMS[form]
     items = read_jsonl(path)
-    # Track 1a query construction follows the starter kit exactly:
-    # topic id = item["id"], query text = item["query"].
-    return [(item["id"], item["query"]) for item in items]
+    return [(item["id"], transform(item["query"])) for item in items]
 
 
 def write_run(path, rows, tag):
@@ -71,16 +130,27 @@ def write_run(path, rows, tag):
 
 
 def method_label(args):
-    """Name that identifies the full pipeline, used for run tags and for the
-    summary filename, so e.g. hybrid and hybrid+rerank never overwrite each
-    other's results."""
-    return args.method + ("_rerank" if args.rerank else "")
+    """Name identifying the full pipeline: first stage, tokenizer, query form
+    and whether reranking is on. Used for run tags and summary filenames, so
+    no two configurations overwrite each other's results.
+
+    The tokenizer is part of the label because it changes the index, not just
+    the ranking -- two runs that differ only in tokenizer are different
+    systems and must not share a results file."""
+    parts = [args.method]
+    if args.tokenizer != "baseline":
+        parts.append(args.tokenizer.replace("+", "-"))
+    if args.query_form != "raw":
+        parts.append(args.query_form)
+    if args.rerank:
+        parts.append("rerank")
+    return "_".join(parts)
 
 
 def build_retriever(args, doc_ids, doc_texts):
     def make_sparse():
         return Retriever(doc_ids, doc_texts, k1=args.k1, b=args.b,
-                         cache_dir=args.cache_dir)
+                         tokenizer=args.tokenizer, cache_dir=args.cache_dir)
 
     def make_dense():
         from dense_retriever import DenseRetriever
@@ -139,6 +209,20 @@ def main():
 
     parser.add_argument("--method", choices=["bm25", "dense", "hybrid"],
                         default="bm25")
+    parser.add_argument("--tokenizer", choices=sorted(TOKENIZERS),
+                        default=DEFAULT_TOKENIZER,
+                        help="lexical tokenizer preset (see retriever.py). "
+                             "'aggressive' measured macro nDCG@10 0.1154 vs "
+                             "0.0719 for 'baseline', better on 13/13 domains. "
+                             "Note that 'stem' and 'stop+stem' measured WORSE "
+                             "than baseline.")
+    parser.add_argument("--query-form", choices=list(QUERY_FORMS),
+                        default="title-weighted",
+                        help="how the query text is reshaped before retrieval. "
+                             "'title-weighted' measured the best macro nDCG@10 "
+                             "and 'title' the best recall@100 -- use 'title' "
+                             "when a reranker follows, since recall is the cap "
+                             "on what reranking can reach.")
     parser.add_argument("--tag", default=None,
                         help="run tag; defaults to track1a_<method label>")
     parser.add_argument("--cache-dir", default=None,
@@ -196,10 +280,26 @@ def main():
     args = parser.parse_args()
     tag = args.tag or f"track1a_{method_label(args)}"
 
+    # Recall, not this stage's own nDCG, is what bounds a reranker. Say so once
+    # rather than silently letting a lower-recall shortlist cap the second
+    # stage -- it is a cheap flag to change and an expensive one to notice.
+    if args.rerank and args.query_form != "title":
+        print(f"  [note] --query-form title measured the highest recall@100 "
+              f"(0.3382 vs {'0.2876' if args.query_form == 'title-weighted' else 'less'} "
+              f"for {args.query_form}); recall is the ceiling on reranking.",
+              flush=True)
+
     doc_ids, doc_texts = load_corpus(args.corpus)
-    queries = load_queries(args.queries)
+    queries = load_queries(args.queries, form=args.query_form)
 
     retriever = build_retriever(args, doc_ids, doc_texts)
+
+    # Release the corpus text once the retrievers hold what they need. Only the
+    # reranker looks documents up again; for every other pipeline this frees
+    # well over a gigabyte on the largest domains, which is the difference
+    # between finishing and being killed by the OOM reaper.
+    if not args.rerank:
+        doc_texts = None
 
     rows = [
         (qid, retriever.search(query, top_k=args.top_k))
