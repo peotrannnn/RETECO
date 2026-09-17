@@ -1,0 +1,5 @@
+# Extra dependencies for --method dense / hybrid in src/track1a.
+# The bm25 method (default) needs nothing beyond the standard library.
+sentence-transformers>=3.0
+torch>=2.2
+faiss-cpu>=1.8

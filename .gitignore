@@ -1,0 +1,22 @@
+# data (tải riêng qua huggingface_hub, không commit)
+reteco_data/
+RETECO/
+cache/
+
+# run output chi tiết (tái tạo được bằng cách chạy lại, chỉ giữ summary json)
+runs/**/*.txt
+runs/**/*.trec
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# os / editor
+.DS_Store
+.vscode/
+
+# secrets
+.env
+*.token
