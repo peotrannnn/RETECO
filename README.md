@@ -7,6 +7,9 @@ Retrieval)** — RETECO shared task.
 - Dataset: https://huggingface.co/datasets/DataScience-UIBK/RETECO-SemEval2027
 - Starter kit (ban tổ chức): https://github.com/DataScienceUIBK/RETECO/tree/main/starter_kit
 
+Mục tiêu: top 5 trở lên trên bảng xếp hạng Track 1a. Metric chính thức:
+**nDCG@10** (qua `pytrec_eval`), macro-average trên 13 domain của Track 1.
+
 ## Cấu trúc repo
 
 ```text

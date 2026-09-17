@@ -1,5 +1,9 @@
-# Extra dependencies for --method dense / hybrid in src/track1a.
-# The bm25 method (default) needs nothing beyond the standard library.
+# Dependencies for src/track1a.
+#
+# --method bm25 needs only numpy + scipy.
+# --method dense / hybrid and --rerank need the rest.
+numpy>=1.24
+scipy>=1.10
 sentence-transformers>=3.0
 torch>=2.2
 faiss-cpu>=1.8

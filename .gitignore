@@ -10,6 +10,11 @@ runs/**/*.trec
 # scratch/test runs -- never official, never tracked
 runs/scratch/
 
+# leftovers from early manual testing, before src/track1a existed --
+# not part of the tracked pipeline output
+runs/my_system/
+runs/starter/
+
 # python
 __pycache__/
 *.pyc
