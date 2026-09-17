@@ -7,6 +7,9 @@ cache/
 runs/**/*.txt
 runs/**/*.trec
 
+# scratch/test runs -- never official, never tracked
+runs/scratch/
+
 # python
 __pycache__/
 *.pyc
