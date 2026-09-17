@@ -92,6 +92,7 @@ def build_retriever(args, doc_ids, doc_texts):
             device=args.device,
             fp16=not args.no_fp16,
             max_seq_length=args.max_seq_length,
+            query_max_seq_length=args.query_max_seq_length,
             query_prefix=args.query_prefix,
             passage_prefix=args.passage_prefix,
         )
@@ -157,8 +158,12 @@ def main():
     parser.add_argument("--model", default="BAAI/bge-base-en-v1.5")
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--max-seq-length", type=int, default=256,
-                        help="encoder truncation length; 256 roughly doubles "
-                             "throughput vs the model's 512 limit")
+                        help="DOCUMENT truncation length; the dominant cost "
+                             "knob, since the corpus is ~99.9% of the encoding")
+    parser.add_argument("--query-max-seq-length", type=int, default=512,
+                        help="QUERY truncation length, separate from documents: "
+                             "queries are cheap to encode and cutting one can "
+                             "remove the temporal condition being scored")
     parser.add_argument(
         "--query-prefix",
         default="Represent this sentence for searching relevant passages: ",

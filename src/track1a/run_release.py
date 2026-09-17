@@ -81,6 +81,7 @@ def run_retrieval(corpus, queries, out, args, tag):
             "--model", args.model,
             "--batch-size", str(args.batch_size),
             "--max-seq-length", str(args.max_seq_length),
+            "--query-max-seq-length", str(args.query_max_seq_length),
             "--query-prefix", args.query_prefix,
             "--passage-prefix", args.passage_prefix,
         ]
@@ -181,6 +182,7 @@ def main():
     parser.add_argument("--model", default="BAAI/bge-base-en-v1.5")
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--max-seq-length", type=int, default=256)
+    parser.add_argument("--query-max-seq-length", type=int, default=512)
     parser.add_argument(
         "--query-prefix",
         default="Represent this sentence for searching relevant passages: ")

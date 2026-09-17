@@ -12,11 +12,17 @@ dense bi-encoder captures semantic similarity BM25 misses.
 Throughput notes -- these matter a lot when encoding all 13 Track 1 domains
 (1.65M documents total):
   * fp16 halves encode time on GPU with no measurable retrieval-quality cost.
-  * `max_seq_length` is the dominant cost factor. The default here (256) is
-    half the model's 512 limit: it roughly doubles throughput, at the cost of
-    truncating long documents earlier. Stack Exchange posts front-load their
-    content, so the loss is usually small -- but raise it to 512 if you have
-    the GPU budget and want to rule that out.
+  * Documents and queries are truncated INDEPENDENTLY, because they cost
+    wildly different amounts. Corpus encoding is ~99.9% of the work (1.65M
+    documents against ~1.2k queries), so document length is the only real
+    cost knob -- while truncating a *query* is the more damaging of the two
+    on this task. Measured on the release: queries run to 338 tokens at most
+    (median 143), and Track 1a's temporal qualifier often sits at the end of
+    a long question body ("...until today?", "...as of 2017"), so cutting a
+    query at 256 can delete the very condition being scored. Documents are
+    longer (median 216, p90 766) but lose information more gracefully.
+    Hence the defaults: documents 256, queries 512 -- full query coverage at
+    effectively no extra cost.
   * Embeddings are cached as float16 on disk (halves cache size: the full
     Track 1 corpus is ~2.5GB cached at fp16 vs ~5GB at fp32) and converted
     back to float32 at load time, which is what faiss needs.
@@ -54,7 +60,7 @@ class DenseRetriever:
 
     def __init__(self, doc_ids, doc_texts, model_name="BAAI/bge-base-en-v1.5",
                  cache_dir=None, batch_size=256, device=None, fp16=True,
-                 max_seq_length=256,
+                 max_seq_length=256, query_max_seq_length=512,
                  query_prefix="Represent this sentence for searching relevant passages: ",
                  passage_prefix="", verbose=True):
         from sentence_transformers import SentenceTransformer
@@ -66,8 +72,11 @@ class DenseRetriever:
         self.passage_prefix = passage_prefix or ""
 
         self.model = SentenceTransformer(model_name, device=device)
-        if max_seq_length:
-            self.model.max_seq_length = int(max_seq_length)
+        model_limit = getattr(self.model, "max_seq_length", 512) or 512
+        self.doc_max_seq_length = int(max_seq_length or model_limit)
+        # The model's positional limit is a hard ceiling (512 for bge-base).
+        self.query_max_seq_length = min(int(query_max_seq_length or model_limit), 512)
+        self.model.max_seq_length = self.doc_max_seq_length
 
         # fp16 only helps on GPU; on CPU it is usually slower and less stable.
         self.use_fp16 = bool(fp16) and torch.cuda.is_available()
@@ -77,7 +86,7 @@ class DenseRetriever:
         cache_path = None
         if cache_dir:
             os.makedirs(cache_dir, exist_ok=True)
-            key = _cache_key(model_name, self.doc_ids, self.model.max_seq_length)
+            key = _cache_key(model_name, self.doc_ids, self.doc_max_seq_length)
             cache_path = os.path.join(cache_dir, f"corpus_{key}.npy")
 
         if cache_path and os.path.isfile(cache_path):
@@ -88,7 +97,8 @@ class DenseRetriever:
         else:
             if verbose:
                 print(f"  [dense] encoding {len(self.doc_ids)} documents "
-                      f"(fp16={self.use_fp16}, max_seq_length={self.model.max_seq_length}, "
+                      f"(fp16={self.use_fp16}, doc_max_seq_length={self.doc_max_seq_length}, "
+                      f"query_max_seq_length={self.query_max_seq_length}, "
                       f"batch_size={batch_size})", flush=True)
             texts = [f"{self.passage_prefix}{t or ''}" for t in doc_texts]
             emb = self.model.encode(
@@ -112,9 +122,17 @@ class DenseRetriever:
 
     def encode_query(self, query):
         q_text = f"{self.query_prefix}{query or ''}"
-        return self.model.encode(
-            [q_text], normalize_embeddings=True, convert_to_numpy=True,
-        ).astype("float32")
+        # Queries get their own (longer) truncation limit -- see the module
+        # docstring. Encoding a query is negligible next to the corpus, so the
+        # extra length is effectively free; losing the tail of a question is
+        # not, because that is where the temporal condition tends to live.
+        self.model.max_seq_length = self.query_max_seq_length
+        try:
+            return self.model.encode(
+                [q_text], normalize_embeddings=True, convert_to_numpy=True,
+            ).astype("float32")
+        finally:
+            self.model.max_seq_length = self.doc_max_seq_length
 
     def search(self, query, top_k=100):
         q_emb = self.encode_query(query)
