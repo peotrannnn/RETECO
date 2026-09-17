@@ -9,18 +9,25 @@ Why a cross-encoder helps where a bi-encoder cannot: a bi-encoder must
 compress the whole document into one vector *before* it has seen the query,
 so it can only measure coarse topical similarity. A cross-encoder reads the
 query and the document together and can judge whether this specific document
-answers this specific question -- including the temporal qualifier that
-Track 1a turns on ("as of 2017", "before the fork", "the latest version").
-That is exactly the distinction the dataset card says lexical and embedding
-retrieval both struggle with, which is why this is the highest-leverage
-component to add after first-stage retrieval.
+answers this specific question -- including the temporal qualifier Track 1a
+turns on ("as of 2017", "before the fork", "the latest version"). That is
+the distinction the dataset card says lexical and embedding retrieval both
+struggle with, which is why this is the highest-leverage stage to add after
+first-stage retrieval.
 
-Cost: reranking is O(candidate_k) forward passes per query, so it only runs
-over the shortlist, never the corpus. With candidate_k=100 and a base-size
-reranker on a T4, a full 13-domain train run is on the order of minutes, not
-hours.
+Cost: O(candidate_k) forward passes per query, over the shortlist only,
+never the corpus.
 
-Requires: sentence-transformers (CrossEncoder), torch.
+Implementation note -- this deliberately uses `transformers` directly rather
+than `sentence_transformers.CrossEncoder`. On sentence-transformers 5.x,
+CrossEncoder.predict feeds the tokenised batch into the model positionally,
+which reaches XLMRoberta's forward as `input_ids=<BatchEncoding>` and dies on
+`input_ids.device`. Driving the tokenizer and model ourselves is the usage
+BAAI documents for bge-reranker, keeps fp16/batching/truncation explicit, and
+does not depend on sentence-transformers internals that change between
+versions.
+
+Requires: transformers, torch.
 """
 
 
@@ -33,38 +40,63 @@ class RerankRetriever:
                  max_length=512, fp16=True, doc_char_limit=4000,
                  verbose=True):
         """
-        base:          first-stage retriever exposing .search(query, top_k)
-        doc_ids/texts: the domain corpus, used to look up candidate text
-        candidate_k:   how many candidates to pull from `base` and rerank
-        max_length:    cross-encoder truncation length (query + document)
+        base:           first-stage retriever exposing .search(query, top_k)
+        doc_ids/texts:  the domain corpus, used to look up candidate text
+        candidate_k:    how many first-stage candidates to rerank
+        max_length:     tokeniser truncation for the (query, document) pair
         doc_char_limit: cheap pre-truncation of document text before
-                       tokenisation; purely a speed guard, the tokeniser
-                       would discard the tail anyway at `max_length`
+                        tokenisation; a speed guard only, the tokeniser would
+                        discard the tail anyway at `max_length`
         """
-        from sentence_transformers import CrossEncoder
         import torch
+        from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
+        self._torch = torch
         self.base = base
         self.doc_text = dict(zip(doc_ids, doc_texts))
         self.candidate_k = candidate_k
         self.batch_size = batch_size
+        self.max_length = max_length
         self.doc_char_limit = doc_char_limit
 
-        self.model = CrossEncoder(model_name, max_length=max_length, device=device)
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = torch.device(device)
+        # fp16 only helps on GPU; on CPU it is slower and less numerically safe.
+        self.use_fp16 = bool(fp16) and self.device.type == "cuda"
 
-        self.use_fp16 = bool(fp16) and torch.cuda.is_available()
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        model = model.to(self.device)
         if self.use_fp16:
-            try:
-                self.model.model = self.model.model.half()
-            except Exception as exc:  # pragma: no cover - version dependent
-                self.use_fp16 = False
-                if verbose:
-                    print(f"  [rerank] fp16 unavailable, staying in fp32: {exc}",
-                          flush=True)
+            model = model.half()
+        model.eval()
+        self.model = model
 
         if verbose:
             print(f"  [rerank] {model_name} (candidate_k={candidate_k}, "
-                  f"max_length={max_length}, fp16={self.use_fp16})", flush=True)
+                  f"max_length={max_length}, batch_size={batch_size}, "
+                  f"device={self.device}, fp16={self.use_fp16})", flush=True)
+
+    def _score_pairs(self, queries, passages):
+        torch = self._torch
+        scores = []
+        with torch.no_grad():
+            for i in range(0, len(queries), self.batch_size):
+                q_batch = queries[i:i + self.batch_size]
+                p_batch = passages[i:i + self.batch_size]
+                # Two parallel lists is the unambiguous form of the pair API:
+                # `text` and `text_pair`. Passing a list of [q, p] lists instead
+                # can be read as pre-tokenised words by some tokenizers.
+                inputs = self.tokenizer(
+                    q_batch, p_batch,
+                    padding=True, truncation=True, max_length=self.max_length,
+                    return_tensors="pt",
+                )
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                logits = self.model(**inputs, return_dict=True).logits
+                scores.extend(logits.view(-1).float().cpu().tolist())
+        return scores
 
     def search(self, query, top_k=100):
         candidates = self.base.search(query, self.candidate_k)
@@ -72,14 +104,11 @@ class RerankRetriever:
             return []
 
         doc_ids = [d for d, _ in candidates]
-        pairs = [
-            (query, (self.doc_text.get(d) or "")[:self.doc_char_limit])
-            for d in doc_ids
-        ]
+        queries = [query] * len(doc_ids)
+        passages = [(self.doc_text.get(d) or "")[:self.doc_char_limit]
+                    for d in doc_ids]
 
-        scores = self.model.predict(
-            pairs, batch_size=self.batch_size, show_progress_bar=False,
-        )
+        scores = self._score_pairs(queries, passages)
 
         ranked = sorted(
             zip(doc_ids, (float(s) for s in scores)),
