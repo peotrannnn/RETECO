@@ -27,6 +27,15 @@ BAAI documents for bge-reranker, keeps fp16/batching/truncation explicit, and
 does not depend on sentence-transformers internals that change between
 versions.
 
+**fp16 is opt-in, not the default, and it is checked at runtime.**
+bge-reranker is an XLM-RoBERTa, and that architecture is prone to fp16
+overflow: the logits come back inf (or nan), every candidate ends up with an
+identical score, the ranking collapses onto the doc-id tie-break, and the run
+still validates and still reports a plausible-looking nDCG. That is a silent
+wrong answer, which is worse than a crash. So the scores are screened for
+non-finite and fully-degenerate values, and the model is permanently
+downgraded to fp32 the first time either shows up.
+
 Requires: transformers, torch.
 """
 
@@ -37,13 +46,16 @@ class RerankRetriever:
     def __init__(self, base, doc_ids, doc_texts,
                  model_name="BAAI/bge-reranker-base",
                  candidate_k=100, batch_size=64, device=None,
-                 max_length=512, fp16=True, doc_char_limit=4000,
+                 max_length=512, fp16=False, doc_char_limit=4000,
                  verbose=True):
         """
         base:           first-stage retriever exposing .search(query, top_k)
         doc_ids/texts:  the domain corpus, used to look up candidate text
         candidate_k:    how many first-stage candidates to rerank
         max_length:     tokeniser truncation for the (query, document) pair
+        fp16:           opt-in. Faster, but see the module docstring: this
+                        architecture can overflow to inf in half precision.
+                        Guarded at runtime either way.
         doc_char_limit: cheap pre-truncation of document text before
                         tokenisation; a speed guard only, the tokeniser would
                         discard the tail anyway at `max_length`
@@ -78,24 +90,62 @@ class RerankRetriever:
                   f"max_length={max_length}, batch_size={batch_size}, "
                   f"device={self.device}, fp16={self.use_fp16})", flush=True)
 
-    def _score_pairs(self, queries, passages):
+    def _forward(self, q_batch, p_batch):
         torch = self._torch
-        scores = []
+        # Two parallel lists is the unambiguous form of the pair API: `text`
+        # and `text_pair`. Passing a list of [q, p] lists instead can be read
+        # as pre-tokenised words by some tokenizers.
+        inputs = self.tokenizer(
+            q_batch, p_batch,
+            padding=True, truncation=True, max_length=self.max_length,
+            return_tensors="pt",
+        )
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
         with torch.no_grad():
-            for i in range(0, len(queries), self.batch_size):
-                q_batch = queries[i:i + self.batch_size]
-                p_batch = passages[i:i + self.batch_size]
-                # Two parallel lists is the unambiguous form of the pair API:
-                # `text` and `text_pair`. Passing a list of [q, p] lists instead
-                # can be read as pre-tokenised words by some tokenizers.
-                inputs = self.tokenizer(
-                    q_batch, p_batch,
-                    padding=True, truncation=True, max_length=self.max_length,
-                    return_tensors="pt",
-                )
-                inputs = {k: v.to(self.device) for k, v in inputs.items()}
-                logits = self.model(**inputs, return_dict=True).logits
-                scores.extend(logits.view(-1).float().cpu().tolist())
+            logits = self.model(**inputs, return_dict=True).logits
+        return logits.view(-1).float().cpu().tolist()
+
+    @staticmethod
+    def _degenerate(values):
+        """True if this batch of scores carries no ranking information."""
+        if not values:
+            return False
+        if any(v != v or v in (float("inf"), float("-inf")) for v in values):
+            return True          # nan / inf
+        return len(values) > 1 and len(set(values)) == 1   # every score identical
+
+    def _demote_to_fp32(self):
+        self.model = self.model.float()
+        self.use_fp16 = False
+        print("  [rerank] WARNING: half-precision produced non-finite or "
+              "constant scores -- the ranking would have collapsed onto the "
+              "doc-id tie-break. Switched to fp32 for the rest of this run.",
+              flush=True)
+
+    def _score_pairs(self, queries, passages):
+        scores = []
+        for i in range(0, len(queries), self.batch_size):
+            q_batch = queries[i:i + self.batch_size]
+            p_batch = passages[i:i + self.batch_size]
+
+            batch_scores = self._forward(q_batch, p_batch)
+
+            if self._degenerate(batch_scores):
+                if self.use_fp16:
+                    self._demote_to_fp32()
+                    batch_scores = self._forward(q_batch, p_batch)
+                if self._degenerate(batch_scores):
+                    # fp32 did not help: this is not a precision problem, and
+                    # silently returning an arbitrary order would be worse
+                    # than stopping.
+                    raise RuntimeError(
+                        "Cross-encoder returned non-finite or constant scores "
+                        "in fp32. Reranking cannot order these candidates; "
+                        "refusing to emit an arbitrary ranking. Check the "
+                        "reranker model and the candidate document texts."
+                    )
+
+            scores.extend(batch_scores)
         return scores
 
     def search(self, query, top_k=100):

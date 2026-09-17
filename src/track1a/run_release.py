@@ -101,6 +101,8 @@ def run_retrieval(corpus, queries, out, args, tag):
             "--rerank-batch-size", str(args.rerank_batch_size),
             "--rerank-max-length", str(args.rerank_max_length),
         ]
+        if args.rerank_fp16:
+            cmd += ["--rerank-fp16"]
 
     subprocess.run(cmd, check=True, cwd=str(HERE), env=utf8_env())
 
@@ -194,6 +196,7 @@ def main():
     parser.add_argument("--candidate-k", type=int, default=100)
     parser.add_argument("--rerank-batch-size", type=int, default=64)
     parser.add_argument("--rerank-max-length", type=int, default=512)
+    parser.add_argument("--rerank-fp16", action="store_true")
 
     args = parser.parse_args()
     if args.cache_dir == "":

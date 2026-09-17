@@ -120,7 +120,10 @@ def build_retriever(args, doc_ids, doc_texts):
             batch_size=args.rerank_batch_size,
             device=args.device,
             max_length=args.rerank_max_length,
-            fp16=not args.no_fp16,
+            # Opt-in, and separate from the bi-encoder's fp16: the reranker
+            # architecture overflows in half precision where the bi-encoder
+            # does not. See reranker.py.
+            fp16=args.rerank_fp16,
         )
 
     return base
@@ -180,6 +183,10 @@ def main():
                         help="how many first-stage candidates to rerank")
     parser.add_argument("--rerank-batch-size", type=int, default=64)
     parser.add_argument("--rerank-max-length", type=int, default=512)
+    parser.add_argument("--rerank-fp16", action="store_true",
+                        help="half precision for the cross-encoder; off by "
+                             "default because this architecture can overflow "
+                             "to inf. Guarded at runtime regardless.")
 
     args = parser.parse_args()
     tag = args.tag or f"track1a_{method_label(args)}"
