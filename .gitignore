@@ -1,30 +1,40 @@
-# data (tải riêng qua huggingface_hub, không commit)
+# --- Dữ liệu tải riêng, không commit -------------------------------------
+# reteco_data: 4,5 GB tải từ HuggingFace
+#   hf download DataScience-UIBK/RETECO-SemEval2027 --repo-type dataset \
+#       --local-dir reteco_data
+# RETECO: bộ công cụ chính thức
+#   git clone https://github.com/DataScienceUIBK/RETECO.git
 reteco_data/
 RETECO/
-cache/
 
-# run output chi tiết (tái tạo được bằng cách chạy lại, chỉ giữ summary json)
+# --- Kết quả suy ra được từ dữ liệu ---------------------------------------
+# Bộ nhớ đệm của notebook EDA. Cố tình KHÔNG commit: nếu code quét thay đổi
+# mà file đệm cũ vẫn còn, notebook sẽ đọc kết quả cũ và không báo gì cả.
+# Xoá thư mục này là notebook tự quét lại.
+notebooks/eda_cache/
+eda_cache/
+
+# Kết quả chạy hệ thống: tái tạo được, và file TREC rất lớn
 runs/**/*.txt
 runs/**/*.trec
-
-# scratch/test runs -- never official, never tracked
 runs/scratch/
+cache/
 
-# leftovers from early manual testing, before src/track1a existed --
-# not part of the tracked pipeline output
-runs/my_system/
-runs/starter/
-
-# python
+# --- Python ----------------------------------------------------------------
 __pycache__/
 *.pyc
 *.pyo
 .ipynb_checkpoints/
+.venv/
+venv/
 
-# os / editor
+# --- Hệ điều hành và trình soạn thảo ---------------------------------------
 .DS_Store
+Thumbs.db
 .vscode/
+.idea/
 
-# secrets
+# --- Bí mật, tuyệt đối không commit ----------------------------------------
 .env
 *.token
+kaggle.json
