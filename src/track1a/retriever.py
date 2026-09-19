@@ -12,28 +12,42 @@ query. That is fine for `iota` (10k documents) and unusable for `history`
 (356k), which running all 13 Track 1 domains requires.
 
 **Tokenization is configurable, and it is the single largest lexical win
-measured so far.** Notebook 02 swept six tokenizers over all 13 domains
-(1,211 queries). Macro nDCG@10:
+measured so far.** Full ablation over all 13 domains (1,211 train queries,
+title-weighted), macro nDCG@10 / macro R@100:
 
-    baseline (lowercase + [A-Za-z0-9]+)   0.0719   <- the original
-    stem            (Porter only)         0.0654   significantly WORSE
-    stop+stem       (Anserini default)    0.0708   significantly WORSE
-    stop_lucene                           0.0763
-    stop+stem+html                        0.0937
-    aggressive                            0.1154   better on 13/13 domains
+    baseline (lowercase + [A-Za-z0-9]+)   0.1139 / 0.3078   <- the original
+    stem            (Porter only)         0.1063 / 0.2945   significantly WORSE
+    html_only                             0.1189 / 0.3203
+    minlen_only                           0.1209 / 0.3257
+    stop+stem+html  (Anserini-ish)        0.1213 / 0.3286
+    aggressive                            0.1434 / 0.3848
+    extstop_only                          0.1459 / 0.4129
+    extstop+minlen                        0.1497 / 0.4193   <- the default
 
-Two things in that table are worth keeping in mind before changing it:
+Three things in that table are worth keeping in mind before changing it, and
+two of them contradict what this file used to claim:
 
-  * Stemming ON ITS OWN HURTS, and so does the Lucene/Anserini default of
-    stopwords+stemming. The intuitive fix made things worse. What actually
-    pays is removing HTML structural tokens: 100% of queries carry markup
-    and the documents carry none, so every `p`, `href`, `li` and `code` in a
-    query is a term that can only ever match noise. Stemming only helps
-    *after* that noise is gone -- before it, conflation makes the noise match
-    more documents, not fewer.
-  * The gain is not a metric artifact. Temporal coverage (TC@10) moves with
-    it, 0.1283 -> 0.2266, and the number of queries covering all of their
-    required time periods goes 99 -> 174 out of 1,211.
+  * Stemming HURTS, everywhere it appears: -0.0076 added to baseline, -0.0062
+    added to html_only, -0.0056 added to extstop_only. The Lucene/Anserini
+    default of stopwords+stemming barely beats doing nothing. The intuitive
+    fix is the wrong one.
+  * Removing HTML structural tokens is NOT the win this file previously said
+    it was. On top of the extended stop list it is worth +0.0003 nDCG@10 --
+    indistinguishable from nothing, and `extstop+html+minlen` ties with
+    `extstop+minlen` so the default leaves it out. The reason the earlier
+    claim looked right is that HTML tokens are mostly ABSENT from the corpus,
+    and BM25 only sums over terms a document actually contains, so they are
+    largely inert rather than harmful.
+  * What does pay, besides the stop list, is min_len=2 -- and not because
+    short words are uninformative. See the comment on DEFAULT_TOKENIZER
+    below: it removes the fragments the `[A-Za-z0-9]+` split leaves behind at
+    apostrophes and punctuation (`s` from possessives and plurals, `t` from
+    contractions, bare digits out of dates), and those fragments reach more
+    than half the corpus.
+
+The gain is not a metric artifact: temporal coverage (TC@10) moves with
+nDCG@10 throughout, and the number of queries covering all of their required
+time periods rises with it.
 
 Same output contract as before:
     search(query, top_k) -> [(doc_id, score), ...] sorted by score descending
@@ -255,9 +269,56 @@ TOKENIZERS = {
     "html+stem+minlen":   dict(drop_html=True, stem=True, min_len=2),
     "extstop_only":       dict(stopwords=EXTENDED_STOPWORDS),
     "minlen_only":        dict(min_len=2),
+    # --- stem-free combinations -------------------------------------------
+    # Measured on all 13 domains (train, title-weighted), macro nDCG@10 /
+    # R@100, against the 0.1139 / 0.3078 baseline:
+    #
+    #     stem alone        0.1063 / 0.2945   <- SIGNIFICANTLY WORSE
+    #     html alone        0.1189 / 0.3203
+    #     min_len alone     0.1209 / 0.3257
+    #     extstop alone     0.1459 / 0.4128   <- best measured so far
+    #     aggressive        0.1434 / 0.3848
+    #
+    # Stemming is the one component that hurts, and it hurts everywhere it
+    # appears: -0.0076 on baseline, -0.0062 on html_only, -0.0056 measured
+    # against extstop_only. But the decomposition above was built as
+    # "aggressive minus one component", and aggressive contains stem, so
+    # every combination tested there drags stem along. The combination of the
+    # three components that DO help was never measured. These close that gap.
+    "extstop+html":        dict(stopwords=EXTENDED_STOPWORDS, drop_html=True),
+    "extstop+minlen":      dict(stopwords=EXTENDED_STOPWORDS, min_len=2),
+    "extstop+html+minlen": dict(stopwords=EXTENDED_STOPWORDS, drop_html=True,
+                                min_len=2),
 }
 
-DEFAULT_TOKENIZER = "aggressive"
+# Settled by paired bootstrap over all 13 domains (pairwise_ci.py on
+# runs/tokenizer_focus.json). `extstop+minlen` beats every simpler variant
+# significantly and ties with `extstop+html+minlen`, so drop_html is dropped:
+#
+#     vs baseline              +0.0358 nDCG / +0.1115 R@100   significant
+#     vs extstop_only          +0.0038 / +0.0064             significant
+#     vs extstop+html          +0.0035 / +0.0060             significant
+#     vs aggressive            +0.0063 / +0.0345             significant
+#     vs extstop+html+minlen   +0.0014 / +0.0003             TIE -> ship simpler
+#
+# Why min_len=2 earns its place, which is not the obvious reason. It is not
+# "short words carry little meaning". The `[A-Za-z0-9]+` tokenizer splits on
+# apostrophes and punctuation, and min_len=2 discards the FRAGMENTS that split
+# leaves behind: possessives and plurals ("Tesla's" -> tesla + s, "1980s" ->
+# 1980 + s), contractions ("don't" -> don + t), and bare digits out of dates
+# ("January 2, 2017" -> january + 2 + 2017). Measured on `law`, the fragment
+# `s` occurs in 56.7% of documents, `1` and `2` in 22-25%. A term that common
+# adds a small score to most of the corpus, and because this BM25 counts query
+# term frequency, a query carrying 28 copies of `s` multiplies that noise by 28.
+#
+# This is also why min_len is NOT redundant with drop_html: HTML_TOKENS has
+# only four single-character members (a, b, i, p), so drop_html leaves s, t, u,
+# e and every single digit untouched.
+#
+# A cleaner fix probably exists -- handling apostrophes in the tokenizer rather
+# than discarding the wreckage afterwards -- but that is unmeasured, and this
+# is what the data supports today.
+DEFAULT_TOKENIZER = "extstop+minlen"
 
 
 def tokenize(text, stopwords=frozenset(), stem=False, drop_html=False,

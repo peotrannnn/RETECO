@@ -3,6 +3,10 @@
 Hệ thống Track 1a: retrieval hai tầng (first-stage + reranking), giữ nguyên
 cách tách trách nhiệm của starter kit nhưng bỏ Track 1b và Track 2.
 
+> **Lịch sử thí nghiệm nằm ở [`EXPERIMENTS.md`](EXPERIMENTS.md).** File README
+> này chỉ ghi *kết luận hiện tại* và cách dùng. Muốn biết vì sao lại chọn như
+> vậy, đã thử những gì, và những kết luận nào đã phải sửa — đọc file kia.
+
 ## Kiến trúc / Architecture
 
 ```text
@@ -55,23 +59,45 @@ run_release.py            điều phối nhiều domain, validate, chấm điể
 
 ## Tokenization — `--tokenizer`
 
-Đo trên đủ 13 domain (1.211 truy vấn train), macro nDCG@10:
+Đo trên đủ 13 domain (1.211 truy vấn train, `title-weighted`) — ablation đầy đủ, kết quả thô ở `runs/tokenizer_ablation.json`:
 
-| Preset | macro nDCG@10 | vs baseline | |
+| Preset | macro nDCG@10 | macro R@100 | |
 | --- | --- | --- | --- |
-| `baseline` | 0,0719 | — | chỉ lowercase + `[A-Za-z0-9]+` |
-| `stem` | 0,0654 | **−0,0090** | **tệ hơn**, có ý nghĩa thống kê |
-| `stop+stem` | 0,0708 | **−0,0041** | **tệ hơn** — đây là mặc định của Anserini |
-| `stop_lucene` | 0,0763 | +0,0056 | |
-| `stop+stem+html` | 0,0937 | +0,0220 | |
-| **`aggressive`** (mặc định) | **0,1154** | **+0,0435** | tốt hơn ở **13/13 domain** |
+| `baseline` | 0,1139 | 0,3078 | chỉ lowercase + `[A-Za-z0-9]+` |
+| `stem` | 0,1063 | 0,2945 | **tệ hơn**, có ý nghĩa thống kê |
+| `html+stem` | 0,1127 | 0,3005 | |
+| `html_only` | 0,1189 | 0,3203 | |
+| `minlen_only` | 0,1209 | 0,3257 | |
+| `stop+stem+html` | 0,1213 | 0,3286 | mặc định kiểu Anserini |
+| `html+stem+extstop` | 0,1402 | 0,3772 | |
+| `aggressive` | 0,1434 | 0,3848 | mặc định **cũ**, 4 thành phần |
+| `extstop_only` | 0,1459 | 0,4129 | |
+| `extstop+html` | 0,1462 | 0,4133 | |
+| `extstop+html+minlen` | 0,1483 | 0,4190 | hoà với dòng dưới → chọn cái đơn giản hơn |
+| **`extstop+minlen`** (mặc định) | **0,1497** | **0,4193** | 2 thành phần, **không** stem, **không** drop_html |
 
-**Hai điều cần nhớ trước khi đổi:**
+Quyết định chốt bằng bootstrap ghép cặp giữa các biến thể (`pairwise_ci.py`), không phải chỉ so với baseline:
 
-1. **Rút gốc từ đơn thuần làm TỆ đi**, và mặc định stopword+stemming kiểu Lucene/Anserini cũng vậy. Cách sửa trực giác nhất lại phản tác dụng. Thứ thực sự có tác dụng là **loại token cấu trúc HTML**: 100% truy vấn mang thẻ HTML còn tài liệu thì không, nên mọi `p`, `href`, `li`, `code` trong truy vấn là một từ khoá chỉ có thể khớp nhiễu. Rút gốc chỉ giúp *sau khi* đã dọn nhiễu đó.
-2. **Không phải ăn may trên một chỉ số.** Độ phủ thời gian TC@10 đi cùng chiều: 0,1283 → 0,2266, và số truy vấn phủ đủ mốc thời gian tăng từ 99 lên 174 trên 1.211.
+| `extstop+minlen` so với | Δ macro nDCG | Δ macro R@100 | Ý nghĩa TK |
+| --- | --- | --- | --- |
+| `baseline` | +0,0358 | +0,1115 | **có** |
+| `extstop_only` | +0,0038 | +0,0064 | **có** |
+| `extstop+html` | +0,0035 | +0,0060 | **có** |
+| `aggressive` | +0,0063 | +0,0345 | **có** |
+| `extstop+html+minlen` | +0,0014 | +0,0003 | **không (hoà)** → bỏ `drop_html` |
 
-> **`aggressive` gộp 3 thay đổi và được chọn là tốt nhất trong 6 biến thể trên tập train.** Chạy `tokenizer_experiment.py` để tách xem thành phần nào thực sự gánh phần lợi ích — đó là nơi hiện tượng overfit dễ ẩn nhất.
+**Bốn điều cần nhớ:**
+
+1. **Stemming gây hại ở mọi nơi nó xuất hiện**: −0,0076 khi thêm vào baseline, −0,0062 khi thêm vào `html_only`, −0,0056 khi thêm vào `extstop_only`. Mặc định stopword+stemming kiểu Anserini chỉ nhỉnh hơn baseline chút ít. Cách sửa trực giác nhất lại phản tác dụng.
+2. **Loại token HTML KHÔNG phải phần thắng lớn** — trái với điều README này từng khẳng định. Khi đã có stop list mở rộng, `drop_html` chỉ đáng +0,0003 nDCG@10, không phân biệt được với con số không. Lý do khẳng định cũ *trông có vẻ* đúng: token HTML phần lớn **không tồn tại trong corpus**, mà BM25 chỉ cộng điểm trên các từ tài liệu *thực sự chứa* — nên chúng gần như trơ, chứ không gây hại.
+3. **`min_len=2` có tác dụng, nhưng không vì lý do người ta tưởng.** Nó không phải "bỏ từ ngắn vì ít thông tin". Regex `[A-Za-z0-9]+` cắt ở dấu nháy và dấu câu, để lại mảnh vụn: `Tesla's` → `tesla`+`s`, `1980s` → `1980`+`s`, `don't` → `don`+`t`, `January 2, 2017` → `january`+`2`+`2017`. Đo trên `law`: mảnh `s` có mặt trong **56,7% tài liệu**, `1` và `2` trong 22–25%. Một từ phổ biến đến vậy cộng một lượng điểm nhỏ cho hơn nửa corpus, và vì BM25 ở đây có tính tần suất từ trong truy vấn, một query chứa 28 chữ `s` nhân lượng nhiễu đó lên 28 lần. Đây cũng là lý do nó **không trùng** với `drop_html`: `HTML_TOKENS` chỉ có 4 token một ký tự (`a`, `b`, `i`, `p`), nên `drop_html` để nguyên `s`, `t`, `u`, `e` và mọi chữ số đơn. Riêng với task **thời gian**, các mảnh `1`/`2` là tàn dư ngày tháng — nhiễu đội lốt tín hiệu thời gian.
+4. **Không phải ăn may trên một chỉ số.** Độ phủ thời gian TC@10 đi cùng chiều với nDCG.
+
+> Có thể còn cách sạch hơn `min_len=2`: xử lý dấu nháy ngay trong tokenizer thay vì dọn mảnh vụn sau đó. Chưa đo — đây là giả thuyết, không phải kết quả.
+
+> **Lỗ hổng đã phát hiện trong thiết kế ablation, đã bịt:** các preset decomposition ban đầu đều dựng theo kiểu "`aggressive` trừ một thành phần", mà `aggressive` luôn chứa `stem` — nên **mọi** tổ hợp được đo đều kéo theo stemming, và tổ hợp của các thành phần *có ích* mà **không có** stem chưa từng được đo. Ba preset `extstop+html`, `extstop+minlen`, `extstop+html+minlen` bịt lỗ hổng đó; chạy `tokenizer_experiment.py --focus` (~15 phút) để đo.
+
+**Đọc bảng kết quả của `tokenizer_experiment.py`:** script in **hai** thống kê khác nhau. Cột `macro nDCG` / `macro R@100` là trung bình theo **domain** — đây là metric chấm điểm của cuộc thi, mọi quyết định đi theo nó. Cột `diff/q` và khoảng tin cậy là trung bình theo **truy vấn**, nên domain nhiều query (history: 561) kéo mạnh hơn domain ít query (iota: 12); chỉ dùng nó để biết "có phải nhiễu không", không dùng để đọc độ lớn.
 
 **Tokenizer nằm trong BM25 cache key.** Hai tokenizer khác nhau tạo ra hai index khác nhau; tái sử dụng nhầm là lỗi *trả sai âm thầm* — file run vẫn hợp lệ, điểm vẫn trông hợp lý.
 
@@ -196,7 +222,7 @@ chỉ chứa kết quả chính thức.
 
 | Cờ | Mặc định | Ý nghĩa | Cần GPU lại? |
 | --- | --- | --- | --- |
-| `--tokenizer` | `aggressive` | biến thể tokenizer (xem bảng trên) | Không |
+| `--tokenizer` | `extstop+minlen` | biến thể tokenizer (xem bảng trên) | Không |
 | `--query-form` | `title-weighted` | dạng truy vấn; dùng `title` khi có rerank | Không |
 | `--sparse-weight` | 0.3 | phiếu của BM25 trong RRF (chưa tinh chỉnh) | Không |
 | `--dense-weight` | 1.0 | phiếu của dense trong RRF | Không |
@@ -232,8 +258,11 @@ chỉ cần thêm một module + một nhánh trong `build_retriever()` của
 | Cấu hình | macro nDCG@10 | R@100 |
 | --- | --- | --- |
 | `baseline` + `raw` (khởi điểm) | 0,0719 | 0,1995 |
-| `aggressive` + `title` | 0,1389 | **0,3910** |
-| **`aggressive` + `title-weighted`** | **0,1434** | 0,3799 |
+| `aggressive` + `title` | 0,1389 | 0,3910 |
+| `aggressive` + `title-weighted` | 0,1434 | 0,3848 |
+| **`extstop+minlen` + `title-weighted`** | **0,1497** | **0,4193** |
+
+> Chưa đo `extstop+minlen` + `title` — `title` là dạng truy vấn cho recall cao nhất ở bundle cũ, nên tổ hợp đó nhiều khả năng còn cao hơn 0,4193. Đo trước khi chạy rerank.
 
 **Mốc đối chiếu — đã sửa.** Con số 0,0879 dùng trước đây **không phải** baseline chính thức. Bảng xếp hạng TEMPO (chính bộ dữ liệu này, 1.730 truy vấn = train + dev, macro trên 13 domain) ghi:
 
@@ -263,10 +292,11 @@ Các số khác:
 
 ## Bước tiếp theo / Next steps
 
-1. **Chạy `tokenizer_experiment.py`** (~20 phút, CPU) để tách `aggressive` thành các thành phần. Nếu một thành phần đơn lẻ đạt gần hết mức lợi ích thì dùng riêng nó — đơn giản hơn, dễ biện minh hơn trong báo cáo, và ít khả năng đang khớp nhiễu của tập train.
-2. **Đo rerank** trên shortlist `aggressive` + `title` (~121.000 cặp, rẻ hơn encode dense khoảng một bậc độ lớn). Lợi ích đã đo: ≥2,8 lần. Không đụng tới embedding cache, không chốt gì không đảo ngược được.
-3. **Xem lại lựa chọn embedding model trước khi encode.** BGE xếp hạng 10/12 trên bảng TEMPO. Model nằm trong cache key — chọn sai là encode lại toàn bộ 1,17 triệu tài liệu.
-4. **Khi encode: chỉ encode 1.167.099 văn bản phân biệt** (giảm 29,4% GPU). Chính sách xuất kết quả cho nhóm trùng lặp là lựa chọn CPU, sweep sau lúc nào cũng được.
-5. **`dev` vẫn chưa đụng tới.** Giữ nguyên cho một lần chạy cuối.
+1. ~~Chạy `tokenizer_experiment.py` để tách `aggressive`~~ — **đã xong.** Kết quả: stemming gây hại, `extstop_only` một mình vượt cả bundle. Mặc định đã đổi sang `extstop_only`.
+2. ~~Chạy `tokenizer_experiment.py --focus`~~ — **đã xong.** Chốt `extstop+minlen`: hơn mọi biến thể đơn giản hơn một cách có ý nghĩa thống kê, hoà với `extstop+html+minlen` nên bỏ `drop_html`. Còn lại: một lượt `--focus --query-form title` để tìm tổ hợp tokenizer × query-form cho recall cao nhất.
+3. **Đo rerank** trên shortlist recall cao nhất (~121.000 cặp, rẻ hơn encode dense khoảng một bậc độ lớn). Không đụng tới embedding cache, không chốt gì không đảo ngược được.
+4. **Xem lại lựa chọn embedding model trước khi encode.** BGE xếp hạng 10/12 trên bảng TEMPO. Model nằm trong cache key — chọn sai là encode lại toàn bộ 1,17 triệu tài liệu.
+5. **Khi encode: chỉ encode 1.167.099 văn bản phân biệt** (giảm 29,4% GPU). Chính sách xuất kết quả cho nhóm trùng lặp là lựa chọn CPU, sweep sau lúc nào cũng được.
+6. **`dev` vẫn chưa đụng tới.** Giữ nguyên cho một lần chạy cuối.
 
 > **Nhắc lại:** cấu trúc ID của bộ dữ liệu có rò rỉ thông tin. Chỉ dùng để ghi nhận trong báo cáo, **không** đưa vào hệ thống dự thi.

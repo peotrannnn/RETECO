@@ -212,10 +212,14 @@ def main():
     parser.add_argument("--tokenizer", choices=sorted(TOKENIZERS),
                         default=DEFAULT_TOKENIZER,
                         help="lexical tokenizer preset (see retriever.py). "
-                             "'aggressive' measured macro nDCG@10 0.1154 vs "
-                             "0.0719 for 'baseline', better on 13/13 domains. "
-                             "Note that 'stem' and 'stop+stem' measured WORSE "
-                             "than baseline.")
+                             "Measured on all 13 domains, macro nDCG@10 / "
+                             "R@100: baseline 0.1139/0.3078, aggressive "
+                             "0.1434/0.3848, extstop+minlen 0.1497/0.4193. "
+                             "The default beats every simpler variant by a "
+                             "paired bootstrap and ties with the one more "
+                             "complex variant. Every preset containing "
+                             "'stem' measured WORSE than the same preset "
+                             "without it.")
     parser.add_argument("--query-form", choices=list(QUERY_FORMS),
                         default="title-weighted",
                         help="how the query text is reshaped before retrieval. "
@@ -243,7 +247,10 @@ def main():
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--max-seq-length", type=int, default=256,
                         help="DOCUMENT truncation length; the dominant cost "
-                             "knob, since the corpus is ~99.9% of the encoding")
+                             # argparse runs help strings through %-formatting,
+                             # so a literal percent must be doubled or --help
+                             # raises TypeError before printing anything.
+                             "knob, since the corpus is ~99.9%% of the encoding")
     parser.add_argument("--query-max-seq-length", type=int, default=512,
                         help="QUERY truncation length, separate from documents: "
                              "queries are cheap to encode and cutting one can "

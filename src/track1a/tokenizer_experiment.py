@@ -79,7 +79,21 @@ ABLATION = [
     ("html+stem+minlen",    "aggressive MINUS extended stopwords"),
     ("stop+stem+html",      "aggressive with Lucene's 33-word stop list"),
     ("aggressive",          "the full bundle"),
+    # The rows above are all "aggressive minus one component", and aggressive
+    # contains stem, so every one of them carries stem. The 13-domain run
+    # measured stem as the only component that HURTS, which leaves the
+    # stem-free combination of the components that help unmeasured. These
+    # three rows close that gap.
+    ("extstop+html",        "extstop + drop_html, NO stem"),
+    ("extstop+minlen",      "extstop + min_len, NO stem"),
+    ("extstop+html+minlen", "all three helpful components, NO stem"),
 ]
+
+# A focused follow-up: the control, the current best, the full bundle for
+# reference, and the three stem-free combinations. Runs in roughly half the
+# time of the full ablation because six variants are skipped.
+FOCUS = ["baseline", "extstop_only", "aggressive",
+         "extstop+html", "extstop+minlen", "extstop+html+minlen"]
 
 QUERY_FORM_DEFAULT = "title-weighted"
 
@@ -297,12 +311,28 @@ def main():
                     choices=list(QUERY_FORMS))
     ap.add_argument("--max-docs", type=int, default=None,
                     help="truncate each corpus; smoke test only")
+    ap.add_argument("--variants", nargs="*", default=None,
+                    help="measure only these variants (space separated). "
+                         "'baseline' is always included as the control.")
+    ap.add_argument("--focus", action="store_true",
+                    help=f"shorthand for --variants {' '.join(FOCUS)}")
     ap.add_argument("--out", default=str(PROJECT_ROOT / "runs" / "tokenizer_ablation.json"))
     args = ap.parse_args()
 
     if args.split != "train":
         print("[!] Competition rule: tune on train. dev is a single held-out "
               "check at the very end.\n")
+
+    wanted = FOCUS if args.focus else args.variants
+    if wanted:
+        unknown = [v for v in wanted if v not in dict(ABLATION)]
+        if unknown:
+            raise SystemExit(f"unknown variant(s): {', '.join(unknown)}\n"
+                             f"available: {', '.join(n for n, _ in ABLATION)}")
+        keep = set(wanted) | {"baseline"}   # baseline is the control for every diff
+        ablation = [(n, d) for n, d in ABLATION if n in keep]
+    else:
+        ablation = list(ABLATION)
 
     root = Path(args.data) / "track1_tempo"
     if not root.is_dir():
@@ -311,9 +341,9 @@ def main():
     form = QUERY_FORMS[args.query_form]
 
     print(f"tokenizer ablation | split={args.split} | query_form={args.query_form}")
-    print(f"{len(ABLATION)} variants x {len(domains)} domains\n")
+    print(f"{len(ablation)} variants x {len(domains)} domains\n")
 
-    results = {name: {} for name, _ in ABLATION}
+    results = {name: {} for name, _ in ablation}
     t_all = time.time()
 
     for d in domains:
@@ -331,7 +361,7 @@ def main():
         print(f"  {d:<12} {len(doc_ids):>7,} docs  |V|={len(terms):>8,}  "
               f"tokenized in {time.time()-t0:.0f}s", flush=True)
 
-        for name, _desc in ABLATION:
+        for name, _desc in ablation:
             opts = TOKENIZERS[name]
             cm, nt = build_vocab_map(terms, opts)
             bm = BM25(doc_ids, remap_counts(counts, cm, len(nt)), nt)
@@ -354,6 +384,12 @@ def main():
                 "vocab": len(nt),
                 "empty_results": empty,
                 "per_query_ndcg": {q: ndcg_at_k(run[q], gold[q]) for q in qids},
+                # Stored so pairwise_ci.py can test recall differences for
+                # significance too. Recall is what caps a reranker, so a
+                # recall difference between two variants is often the one
+                # that actually decides which to ship.
+                "per_query_recall": {q: recall_at_k(run[q], gold[q], 100)
+                                     for q in qids},
             }
             print(f"      {name:<20} nDCG@10 {results[name][d]['nDCG@10']:.4f}  "
                   f"R@100 {results[name][d]['R@100']:.4f}  |V|={len(nt):>8,}"
@@ -365,48 +401,98 @@ def main():
         gc.collect()
 
     # ------------------------------------------------------------- report --
+    #
+    # Two different statistics get reported below, and an earlier version of
+    # this script printed both while calling both "gain", which is a good way
+    # to read a table wrong:
+    #
+    #   macro nDCG@10  - mean over DOMAINS, each domain weighted equally.
+    #                    This is the competition's metric. Decisions follow it.
+    #   mean per-query - mean over QUERIES, so a domain with 561 queries moves
+    #                    it far more than one with 12. Only the bootstrap CI
+    #                    is computed on this, because a CI needs the paired
+    #                    per-query differences.
+    #
+    # They disagree by design. The columns are labelled so they cannot be
+    # compared by accident: macro columns say "macro", per-query ones say "/q".
     base = results["baseline"]
-    agg = results["aggressive"]
-    print(f"\n{'='*104}")
-    print(f"{'variant':<22}{'description':<40}{'macro':>8}{'vs base':>10}"
-          f"{'CI of diff':>20}{'sig':>5}")
-    print("-" * 104)
-    table = []
-    for name, desc in ABLATION:
+
+    def macro_of(name, metric="nDCG@10"):
         per = results[name]
-        macro = float(np.mean([r["nDCG@10"] for r in per.values()]))
+        return float(np.mean([r[metric] for r in per.values()]))
+
+    print(f"\n{'='*112}")
+    print(f"{'variant':<22}{'description':<40}"
+          f"{'macro nDCG':>11}{'macro R@100':>12}{'diff/q':>9}{'CI of diff/q':>18}{'sig':>5}")
+    print("-" * 112)
+    table = []
+    for name, desc in ablation:
+        per = results[name]
+        macro = macro_of(name)
+        rec = macro_of(name, "R@100")
         diffs = [per[d]["per_query_ndcg"][q] - base[d]["per_query_ndcg"][q]
                  for d in per for q in per[d]["per_query_ndcg"]
                  if q in base[d]["per_query_ndcg"]]
         dm, lo, hi = bootstrap_ci(diffs)
         sig = lo > 0 or hi < 0
         emp = sum(r["empty_results"] for r in per.values())
-        table.append((name, desc, macro, dm, lo, hi, sig, emp))
-        print(f"{name:<22}{desc:<40}{macro:>8.4f}{dm:>+10.4f}"
-              f"{f'[{lo:+.4f},{hi:+.4f}]':>20}{('YES' if sig else '-'):>5}"
+        table.append((name, desc, macro, rec, dm, lo, hi, sig, emp))
+        print(f"{name:<22}{desc:<40}{macro:>11.4f}{rec:>12.4f}{dm:>+9.4f}"
+              f"{f'[{lo:+.4f},{hi:+.4f}]':>18}{('YES' if sig else '-'):>5}"
               + (f"  !! {emp} empty" if emp else ""))
 
-    agg_macro = dict((t[0], t[2]) for t in table)["aggressive"]
-    print(f"\n{'='*104}")
-    print("MARGINAL CONTRIBUTION -- what each component adds ON TOP OF the rest")
-    print("-" * 104)
-    for minus, comp in [("html+stem+extstop", "min_len=2"),
-                        ("html+stem+minlen", "extended stopwords"),
-                        ("stop+stem+html", "extended vs Lucene stop list")]:
-        if minus in dict((t[0], t[2]) for t in table):
-            m = dict((t[0], t[2]) for t in table)[minus]
-            print(f"  {comp:<32} {agg_macro - m:+.4f}   "
-                  f"(aggressive {agg_macro:.4f} - {minus} {m:.4f})")
-    solo = dict((t[0], t[2]) for t in table)
-    print(f"\n  drop_html ALONE                  {solo['html_only'] - solo['baseline']:+.4f}")
-    print(f"  extended stopwords ALONE         {solo['extstop_only'] - solo['baseline']:+.4f}")
-    print(f"  min_len=2 ALONE                  {solo['minlen_only'] - solo['baseline']:+.4f}")
-    print(f"  stem ALONE                       {solo['stem'] - solo['baseline']:+.4f}")
+    macro_ndcg = {t[0]: t[2] for t in table}
+    macro_rec = {t[0]: t[3] for t in table}
+    b_n, b_r = macro_ndcg["baseline"], macro_rec["baseline"]
 
-    print(f"\n  HOW TO READ THIS: if one component's 'ALONE' figure is close to")
-    print(f"  aggressive's total gain of {agg_macro - solo['baseline']:+.4f}, ship that component by")
-    print(f"  itself -- it is simpler, easier to justify, and less likely to be")
-    print(f"  fitting noise in the train split.")
+    # ---- what each component contributes, all in macro terms ---------------
+    print(f"\n{'='*112}")
+    print("COMPONENT CONTRIBUTIONS (macro nDCG@10 / macro R@100, vs baseline "
+          f"{b_n:.4f} / {b_r:.4f})")
+    print("-" * 112)
+
+    def show(label, name, against=None):
+        """One component's effect. `against` makes it a marginal contribution
+        (this variant minus the one without the component); otherwise it is
+        the variant's effect measured from baseline."""
+        if name not in macro_ndcg or (against and against not in macro_ndcg):
+            return
+        ref_n = macro_ndcg[against] if against else b_n
+        ref_r = macro_rec[against] if against else b_r
+        print(f"  {label:<38}{macro_ndcg[name]-ref_n:>+9.4f}{macro_rec[name]-ref_r:>+11.4f}"
+              + (f"   ({name} - {against})" if against else ""))
+
+    print("  ALONE, from baseline:")
+    show("drop_html", "html_only")
+    show("extended stopwords", "extstop_only")
+    show("min_len=2", "minlen_only")
+    show("stem", "stem")
+
+    print("\n  MARGINAL, on top of the rest of `aggressive`:")
+    show("min_len=2", "aggressive", "html+stem+extstop")
+    show("extended stopwords", "aggressive", "html+stem+minlen")
+    show("extended vs Lucene stop list", "aggressive", "stop+stem+html")
+
+    print("\n  MARGINAL, on top of extended stopwords (stem-free):")
+    show("+ drop_html", "extstop+html", "extstop_only")
+    show("+ min_len=2", "extstop+minlen", "extstop_only")
+    show("+ both", "extstop+html+minlen", "extstop_only")
+
+    # ---- the decision ------------------------------------------------------
+    print(f"\n{'='*112}")
+    best_n = max(macro_ndcg, key=macro_ndcg.get)
+    best_r = max(macro_rec, key=macro_rec.get)
+    print(f"  best macro nDCG@10 : {best_n:<24}{macro_ndcg[best_n]:.4f}  "
+          f"({macro_ndcg[best_n]-b_n:+.4f} vs baseline)")
+    print(f"  best macro R@100   : {best_r:<24}{macro_rec[best_r]:.4f}  "
+          f"({macro_rec[best_r]-b_r:+.4f} vs baseline)")
+    if best_n != best_r:
+        print(f"\n  The two metrics disagree. Recall is the ceiling on any reranker,")
+        print(f"  so a pipeline that ends in reranking should follow '{best_r}';")
+        print(f"  a first-stage-only submission should follow '{best_n}'.")
+    print(f"\n  Prefer the SIMPLEST variant whose figures are not measurably worse")
+    print(f"  than the best -- fewer components is less train-split overfitting,")
+    print(f"  and a shorter paragraph to defend in the system paper.")
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
