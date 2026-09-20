@@ -1,0 +1,44 @@
+{
+ "af3eb864b4b2": {
+  "name": "bm25_default",
+  "split": "train",
+  "system": {
+   "retrieve": {
+    "kind": "sparse",
+    "query_form": "title_weighted",
+    "tokenizer": "nohtml_stop",
+    "model": "bm25",
+    "k1": 0.9,
+    "b": 0.4,
+    "depth": 100
+   },
+   "dedup": null,
+   "rerank": null,
+   "fuse": null
+  },
+  "when": "2026-09-20T16:59:46+00:00",
+  "aliases": []
+ },
+ "f326339da67a": {
+  "name": "bm25_tuned",
+  "split": "train",
+  "system": {
+   "retrieve": {
+    "kind": "sparse",
+    "query_form": "title_weighted",
+    "tokenizer": "nohtml_stop",
+    "model": "bm25",
+    "k1": 2.0,
+    "b": 0.9,
+    "depth": 100
+   },
+   "dedup": null,
+   "rerank": null,
+   "fuse": null
+  },
+  "when": "2026-09-20T16:59:47+00:00",
+  "aliases": [
+   "bm25_tuned_with_null_rerank"
+  ]
+ }
+}

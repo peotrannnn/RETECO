@@ -1,0 +1,13 @@
+{
+  "name": "bm25_default",
+  "note": "the starter kit's parameters, kept as the reference point",
+  "retrieve": {
+    "kind": "sparse",
+    "query_form": "title_weighted",
+    "tokenizer": "nohtml_stop",
+    "model": "bm25",
+    "k1": 0.9,
+    "b": 0.4,
+    "depth": 100
+  }
+}

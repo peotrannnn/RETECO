@@ -1,0 +1,119 @@
+{
+ "bitcoin": {
+  "documents": 153291,
+  "terms": 733717,
+  "nonzeros": 17616922,
+  "tokens": 40299229.0,
+  "avg_doc_length": 262.8936402006641,
+  "bytes": 214337936,
+  "build_seconds": 54.97436785697937
+ },
+ "cardano": {
+  "documents": 87201,
+  "terms": 617988,
+  "nonzeros": 11561694,
+  "tokens": 25428131.0,
+  "avg_doc_length": 291.6036628020321,
+  "bytes": 141212284,
+  "build_seconds": 33.45344424247742
+ },
+ "economics": {
+  "documents": 93756,
+  "terms": 545175,
+  "nonzeros": 11204870,
+  "tokens": 21066794.0,
+  "avg_doc_length": 224.69808865565938,
+  "bytes": 136639144,
+  "build_seconds": 30.478586435317993
+ },
+ "genealogy": {
+  "documents": 156228,
+  "terms": 1153147,
+  "nonzeros": 23179370,
+  "tokens": 41388010.0,
+  "avg_doc_length": 264.920564815526,
+  "bytes": 282765032,
+  "build_seconds": 65.22705459594727
+ },
+ "history": {
+  "documents": 356493,
+  "terms": 920022,
+  "nonzeros": 52902546,
+  "tokens": 106235281.0,
+  "avg_doc_length": 298.0010294732295,
+  "bytes": 638510644,
+  "build_seconds": 202.56284594535828
+ },
+ "hsm": {
+  "documents": 213818,
+  "terms": 1032518,
+  "nonzeros": 28658677,
+  "tokens": 50868317.0,
+  "avg_doc_length": 237.90474609247116,
+  "bytes": 348034200,
+  "build_seconds": 130.4919605255127
+ },
+ "iota": {
+  "documents": 10372,
+  "terms": 387144,
+  "nonzeros": 2046706,
+  "tokens": 4926386.0,
+  "avg_doc_length": 474.96972618588507,
+  "bytes": 26109052,
+  "build_seconds": 10.9880850315094
+ },
+ "law": {
+  "documents": 43288,
+  "terms": 467791,
+  "nonzeros": 5272547,
+  "tokens": 9638138.0,
+  "avg_doc_length": 222.65149695065608,
+  "bytes": 65141732,
+  "build_seconds": 23.735103845596313
+ },
+ "monero": {
+  "documents": 85093,
+  "terms": 626937,
+  "nonzeros": 11688221,
+  "tokens": 27798975.0,
+  "avg_doc_length": 326.6893281468511,
+  "bytes": 142766404,
+  "build_seconds": 82.64184260368347
+ },
+ "politics": {
+  "documents": 183394,
+  "terms": 767456,
+  "nonzeros": 23312651,
+  "tokens": 40143933.0,
+  "avg_doc_length": 218.8944731016282,
+  "bytes": 282821640,
+  "build_seconds": 104.02469491958618
+ },
+ "quant": {
+  "documents": 28785,
+  "terms": 217115,
+  "nonzeros": 3095985,
+  "tokens": 6144219.0,
+  "avg_doc_length": 213.4521104742053,
+  "bytes": 38020284,
+  "build_seconds": 8.909734725952148
+ },
+ "travel": {
+  "documents": 177677,
+  "terms": 944827,
+  "nonzeros": 19878236,
+  "tokens": 29229959.0,
+  "avg_doc_length": 164.5117769885804,
+  "bytes": 242318144,
+  "build_seconds": 51.03406310081482
+ },
+ "workplace": {
+  "documents": 64659,
+  "terms": 133907,
+  "nonzeros": 5901773,
+  "tokens": 11001128.0,
+  "avg_doc_length": 170.14070740345505,
+  "bytes": 71356908,
+  "build_seconds": 16.051218271255493
+ }
+}

@@ -13,36 +13,36 @@
   "simple"
  ],
  "macro": {
-  "nohtml_stop|boolean_and": 0.0011027771898434726,
+  "nohtml_stop|boolean_and": 0.004062863331002268,
   "nohtml_stop|boolean_or": 0.0013678431118680997,
   "nohtml_stop|tf": 0.0021152662054369923,
   "nohtml_stop|tfidf": 0.14074341108058633,
   "nohtml_stop|bm25": 0.14628400487667695,
-  "simple|boolean_and": 0.0011027771898434726,
+  "simple|boolean_and": 0.004062863331002268,
   "simple|boolean_or": 0.0013732177712054774,
   "simple|tf": 0.0,
   "simple|tfidf": 0.14521748980553234,
   "simple|bm25": 0.113929636639317
  },
  "recall": {
-  "nohtml_stop|boolean_and": 0.0008241758241758242,
+  "nohtml_stop|boolean_and": 0.003036437246963563,
   "nohtml_stop|boolean_or": 0.010343333137450783,
   "nohtml_stop|tf": 0.019690820223274584,
   "nohtml_stop|tfidf": 0.508407889236204,
   "nohtml_stop|bm25": 0.40752092284214025,
-  "simple|boolean_and": 0.0008241758241758242,
+  "simple|boolean_and": 0.003036437246963563,
   "simple|boolean_or": 0.004537521302227184,
   "simple|tf": 0.002380952380952381,
   "simple|tfidf": 0.5015169885466345,
   "simple|bm25": 0.3078160417854719
  },
  "n_topics": {
-  "nohtml_stop|boolean_and": 1211,
+  "nohtml_stop|boolean_and": 141,
   "nohtml_stop|boolean_or": 1211,
   "nohtml_stop|tf": 1211,
   "nohtml_stop|tfidf": 1211,
   "nohtml_stop|bm25": 1211,
-  "simple|boolean_and": 1211,
+  "simple|boolean_and": 138,
   "simple|boolean_or": 1211,
   "simple|tf": 1211,
   "simple|tfidf": 1211,
@@ -51,9 +51,9 @@
  "n_queries_total": 1211,
  "scorer_trap": {
   "boolean_and": {
-   "reported": 0.0011027771898434726,
+   "reported": 0.004062863331002268,
    "honest": 0.0011027771898434726,
-   "answered": 1211
+   "answered": 141
   },
   "boolean_or": {
    "reported": 0.0013678431118680997,
@@ -95,33 +95,44 @@
    "ci_high": 0.0032001316007929177,
    "significant": false
   },
-  "boolean_or vs boolean_and": {
-   "diff": 0.00026506592202462704,
-   "ci_low": 0.0,
-   "ci_high": 0.0006653521347302564,
-   "significant": false
-  },
-  "bm25 vs boolean_and": {
-   "diff": 0.1451812276868335,
-   "ci_low": 0.12540353234289378,
-   "ci_high": 0.16633156949057679,
+  "bm25 vs boolean_or": {
+   "diff": 0.14491616176480887,
+   "ci_low": 0.12508123747126954,
+   "ci_high": 0.16599435252356365,
    "significant": true
   }
  },
  "fit": {
-  "boolean_and": 0.0008422351548976076,
+  "boolean_and": 0.0029478230421416266,
   "boolean_or": 0.0010045421940771385,
   "tf": 0.0023026453152195517,
   "tfidf": 0.13887387055317177,
   "bm25": 0.14335612164215894
  },
  "check": {
-  "boolean_and": 0.0021449453296269326,
+  "boolean_and": 0.010009744871592351,
   "boolean_or": 0.0028210467830319438,
   "tf": 0.0013657497663067545,
   "tfidf": 0.1514702166017486,
   "bm25": 0.15979210849800832
  },
+ "ceiling": {
+  "nohtml_stop|boolean_and": 0.004062863331002268,
+  "nohtml_stop|boolean_or": 0.012472725558280277,
+  "nohtml_stop|tf": 0.023478045892406388,
+  "nohtml_stop|tfidf": 0.5680427220048816,
+  "nohtml_stop|bm25": 0.45841161064367,
+  "simple|boolean_and": 0.004062863331002268,
+  "simple|boolean_or": 0.0062022894088886605,
+  "simple|tf": 0.0028153617736658863,
+  "simple|tfidf": 0.5620431209811088,
+  "simple|bm25": 0.3468974594170161
+ },
  "winner": "bm25",
- "order_holds_on_check": false
+ "best_first_stage": "tfidf",
+ "contenders": [
+  "tfidf",
+  "bm25"
+ ],
+ "order_holds_on_check": true
 }

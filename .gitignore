@@ -26,6 +26,21 @@ cache/
 notebooks/results/*_runs.json
 results/*_runs.json
 
+# Danh sách toàn bộ term được chọn (mục 8 của 03a). Cỡ hàng chục MB và sinh
+# lại được bằng chính ô lệnh đó. Phần THỐNG KÊ (term_stats.json, có sẵn 200
+# term đứng đầu) thì vẫn commit -- đó mới là thứ cần đọc lại sau này.
+notebooks/results/terms_selected.txt
+results/terms_selected.txt
+
+# Đầu ra của khung ở notebook 06b.
+#   runs/   danh sách tài liệu, rất lớn, tái tạo được từ cấu hình
+#   scores/ và index.json thì VẪN COMMIT: đó là thứ hai người ghép với nhau
+notebooks/results/runs/
+results/runs/
+
+# File nộp: sinh lại được, và không nên lẫn vào lịch sử
+submissions/
+
 # --- Python ----------------------------------------------------------------
 __pycache__/
 *.pyc

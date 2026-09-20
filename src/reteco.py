@@ -8,7 +8,8 @@ Contents
     Loading      load_corpus, load_queries, load_qrels, list_domains
     Tokenising   tokenize_simple, tokenize_lucene, make_tokenizer
     Retrieval    RetrievalIndex, BM25
-    Scoring      ndcg_at_k, recall_at_k, evaluate, macro
+    Scoring      ndcg_at_k, recall_at_k, precision_at_k, f1_at_k,
+                 average_precision, evaluate, macro
     Splitting    make_split, restrict
     Ceilings     rerank_ceiling
     Statistics   bootstrap_macro_diff
@@ -33,7 +34,8 @@ __all__ = [
     "tokenize_simple", "tokenize_lucene", "make_tokenizer", "PorterStemmer",
     "LUCENE_STOPWORDS", "EXTENDED_STOPWORDS", "HTML_WORDS",
     "RetrievalIndex", "BM25", "reference_bm25_search",
-    "ndcg_at_k", "recall_at_k", "evaluate", "macro",
+    "ndcg_at_k", "recall_at_k", "precision_at_k", "f1_at_k",
+    "average_precision", "evaluate", "macro",
     "make_split", "restrict", "rerank_ceiling",
     "bootstrap_macro_diff",
 ]
@@ -354,6 +356,10 @@ class RetrievalIndex:
                  documents stop winning merely by being long.
     bm25         Okapi BM25. Like tfidf, but term frequency saturates (k1) and
                  the length correction is tunable (b).
+    qlm          Query likelihood with Dirichlet smoothing. Each document is a
+                 language model; the score is the probability that model would
+                 generate the query. A different family from the three above:
+                 it estimates probabilities rather than weighting terms.
 
     All five share the tie-breaking rule in `_top_k`, so a measured difference
     between two of them is a difference in the model and not in how ties
@@ -366,17 +372,20 @@ class RetrievalIndex:
     query tested.
     """
 
-    WEIGHTINGS = ("boolean_and", "boolean_or", "tf", "tfidf", "bm25")
+    WEIGHTINGS = ("boolean_and", "boolean_or", "tf", "tfidf", "bm25", "qlm")
     BLOCK = 50_000            # rows per block when row indices are needed
 
     def __init__(self, doc_ids, doc_texts, tokenizer=tokenize_simple,
-                 weighting="bm25", k1=0.9, b=0.4, keep_counts=True):
+                 weighting="bm25", k1=0.9, b=0.4, mu=2000.0,
+                 keep_counts=True):
         self.doc_ids = list(doc_ids)
         self.tokenizer = tokenizer
-        self.k1, self.b = k1, b
+        self.k1, self.b, self.mu = k1, b, float(mu)
         self.N = len(self.doc_ids)
         self.weighting = None
+        self._weight_key = None
         self._idf = None
+        self._qlm_bias = None
 
         # --- one pass: raw term frequencies into a document x term CSR matrix
         vocab = {}
@@ -470,17 +479,41 @@ class RetrievalIndex:
         for lo, hi, rows in self._row_blocks(matrix):
             data[lo:hi] *= inverse[rows]
 
-    def set_weighting(self, weighting):
-        """Rebuild the weight matrix for another model. Returns self."""
+    def set_weighting(self, weighting, k1=None, b=None, use_idf=True,
+                      mu=None):
+        """Rebuild the weight matrix for another model. Returns self.
+
+        `k1` and `b` override the values given to the constructor and affect
+        only bm25. `use_idf=False` drops the idf factor from bm25 or tfidf --
+        not a sensible retrieval model, but the way to measure what idf alone
+        is worth by taking it out and rerunning.
+
+        Two limits of `k1` are worth knowing, because they turn bm25 into
+        other models without changing any other code:
+
+            k1 -> 0    term frequency stops mattering entirely; the weight
+                       becomes idf alone, i.e. a weighted boolean model
+            k1 -> inf  saturation disappears; the weight becomes proportional
+                       to raw term frequency, i.e. length-normalised tf-idf
+
+        So sweeping `k1` is not only tuning: it moves along a line between
+        three classical models, and the best point on that line is an answer
+        about this corpus rather than about bm25.
+        """
         if weighting not in self.WEIGHTINGS:
             raise ValueError(f"unknown weighting {weighting!r}; "
                              f"expected one of {self.WEIGHTINGS}")
-        if weighting == self.weighting:
+        k1 = self.k1 if k1 is None else float(k1)
+        b = self.b if b is None else float(b)
+        mu = self.mu if mu is None else float(mu)
+        key = (weighting, k1, b, bool(use_idf), mu)
+        if key == self._weight_key:
             return self
         if self._counts is None:
             raise RuntimeError("term counts were released (keep_counts=False); "
                                "rebuild the index to change weighting")
 
+        self.k1, self.b, self.mu = k1, b, mu
         weights = self._counts.copy()
         f = weights.data
 
@@ -492,19 +525,40 @@ class RetrievalIndex:
             # Classical vector space idf. Deliberately NOT BM25's idf: they are
             # different formulas and the point of this class is to compare the
             # models as they are defined, not a hybrid of them.
-            self._idf = np.log(self.N / np.maximum(self.df, 1.0))
+            self._idf = (np.log(self.N / np.maximum(self.df, 1.0)) if use_idf
+                         else np.ones(len(self.df), dtype=np.float64))
             f[:] = (1.0 + np.log(f)) * self._idf[weights.indices]
             self._normalise_rows(weights)
+        elif weighting == "qlm":
+            # log P(q|d) with Dirichlet smoothing splits into a part that only
+            # touches terms the document actually contains, and a part that is
+            # the same for every query term:
+            #
+            #   score = SUM(t in q, tf>0) qtf * log(1 + tf / (mu * p(t|C)))
+            #           - |q| * log(|d| + mu)
+            #
+            # The first line is a sparse matrix exactly like the others. The
+            # second is one number per document, applied in `search`, because
+            # it scales with the query length rather than with any term.
+            collection = np.bincount(
+                self._counts.indices,
+                weights=self._counts.data,
+                minlength=len(self.df)).astype(np.float64)
+            total = collection.sum() or 1.0
+            probability = np.maximum(collection / total, 1e-12)
+            f[:] = np.log1p(f / (self.mu * probability[weights.indices]))
+            self._qlm_bias = -np.log(self.doc_len + self.mu)
         else:                                            # bm25
-            idf = np.log(1.0 + (self.N - self.df + 0.5) / (self.df + 0.5))
-            norm = self.k1 * (1 - self.b
-                              + self.b * self.doc_len / (self.avgdl or 1.0))
+            idf = (np.log(1.0 + (self.N - self.df + 0.5) / (self.df + 0.5))
+                   if use_idf else np.ones(len(self.df), dtype=np.float64))
+            norm = k1 * (1 - b + b * self.doc_len / (self.avgdl or 1.0))
             for lo, hi, rows in self._row_blocks(weights):
                 block = f[lo:hi]
                 f[lo:hi] = (idf[weights.indices[lo:hi]] * block
-                            * (self.k1 + 1.0) / (block + norm[rows]))
+                            * (k1 + 1.0) / (block + norm[rows]))
 
         self.weighting = weighting
+        self._weight_key = key
         self.index = weights.T.tocsr()      # term-major, so a query slices rows
         return self
 
@@ -553,6 +607,11 @@ class RetrievalIndex:
         scores = np.asarray(
             (sparse.csr_matrix(multipliers[None, :]) @ self.index[rows]).todense()
         ).ravel()
+
+        if self.weighting == "qlm":
+            # The -|q| * log(|d| + mu) part. It depends on the document and on
+            # how many query terms there are, so it cannot live in the matrix.
+            scores = scores + float(multipliers.sum()) * self._qlm_bias
 
         if self.weighting == "boolean_and":
             # Keep only documents matching every query term, then return them
@@ -688,6 +747,47 @@ def recall_at_k(ranked_ids, gold_ids, k=100):
     return len(set(ranked_ids[:k]) & set(gold_ids)) / len(gold_ids)
 
 
+def precision_at_k(ranked_ids, gold_ids, k=10):
+    """Share of the first k results that are relevant."""
+    top = ranked_ids[:k]
+    if not top:
+        return 0.0
+    return len(set(top) & set(gold_ids)) / len(top)
+
+
+def f1_at_k(ranked_ids, gold_ids, k=10):
+    """Harmonic mean of precision and recall at k.
+
+    This is the set-based view: the first k results are treated as one
+    retrieved set and their order inside it is ignored.
+    """
+    precision = precision_at_k(ranked_ids, gold_ids, k)
+    recall = recall_at_k(ranked_ids, gold_ids, k)
+    if not recall or precision + recall == 0:
+        return 0.0
+    return 2 * precision * recall / (precision + recall)
+
+
+def average_precision(ranked_ids, gold_ids, k=None):
+    """Average precision for one query; the mean over queries is MAP.
+
+    Precision is read off at every rank that holds a relevant document, and
+    those values are averaged over the number of relevant documents. A relevant
+    document that is never retrieved contributes 0, which is why the divisor is
+    the gold count and not the number found.
+    """
+    if not gold_ids:
+        return None
+    gold = set(gold_ids)
+    ranked = ranked_ids[:k] if k else ranked_ids
+    hits, total = 0, 0.0
+    for rank, doc_id in enumerate(ranked, start=1):
+        if doc_id in gold:
+            hits += 1
+            total += hits / rank
+    return total / len(gold)
+
+
 def evaluate(run, gold, k=10, recall_k=100):
     """Score one domain.
 
@@ -703,15 +803,30 @@ def evaluate(run, gold, k=10, recall_k=100):
     qids = [q for q in gold if q in run]
     per_query_ndcg = {q: ndcg_at_k(run[q], gold[q], k) for q in qids}
     per_query_recall = {q: recall_at_k(run[q], gold[q], recall_k) for q in qids}
+    per_query_ap = {q: average_precision(run[q], gold[q]) for q in qids}
     valid_recall = [v for v in per_query_recall.values() if v is not None]
+    valid_ap = [v for v in per_query_ap.values() if v is not None]
+
+    def mean_of(function, **kwargs):
+        values = [function(run[q], gold[q], **kwargs) for q in qids]
+        values = [v for v in values if v is not None]
+        return float(np.mean(values)) if values else 0.0
 
     return {
+        # The official metric, and the one every earlier notebook reports.
         "ndcg": float(np.mean(list(per_query_ndcg.values()))) if qids else 0.0,
         "recall": float(np.mean(valid_recall)) if valid_recall else 0.0,
+        # Set-based view of the first k results: order inside them ignored.
+        "precision": mean_of(precision_at_k, k=k),
+        "f1": mean_of(f1_at_k, k=k),
+        "recall_at_cut": mean_of(recall_at_k, k=k),
+        # Rank-aware, over the whole returned list.
+        "map": float(np.mean(valid_ap)) if valid_ap else 0.0,
         "n_topics": len(qids),
         "n_gold_queries": len(gold),
         "per_query_ndcg": per_query_ndcg,
         "per_query_recall": per_query_recall,
+        "per_query_ap": per_query_ap,
     }
 
 
