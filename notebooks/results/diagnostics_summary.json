@@ -1,0 +1,10 @@
+{
+ "current_ndcg": 0.14628400487667695,
+ "rerank_ceiling_at_100": 0.45841161064367,
+ "rerank_ceiling_at_1000": 0.7295827685515197,
+ "recall_at_100": 0.40752092284214025,
+ "recall_at_1000": 0.6838552893180802,
+ "lexically_reachable_pct": 99.31522483451266,
+ "split_fit": 969,
+ "split_check": 242
+}

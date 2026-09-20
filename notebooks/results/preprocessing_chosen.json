@@ -1,0 +1,9 @@
+{
+ "tokenizer": "nohtml_stop",
+ "query_form": "title_weighted",
+ "macro_ndcg": 0.14628400487667695,
+ "macro_recall": 0.40752092284214025,
+ "baseline_ndcg": 0.07194281550156773,
+ "improvement": 0.07434118937510922,
+ "n_topics": 1211
+}

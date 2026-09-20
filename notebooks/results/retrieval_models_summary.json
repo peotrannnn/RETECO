@@ -1,0 +1,127 @@
+{
+ "top_k": 100,
+ "query_form": "title_weighted",
+ "models": [
+  "boolean_and",
+  "boolean_or",
+  "tf",
+  "tfidf",
+  "bm25"
+ ],
+ "tokenizers": [
+  "nohtml_stop",
+  "simple"
+ ],
+ "macro": {
+  "nohtml_stop|boolean_and": 0.0011027771898434726,
+  "nohtml_stop|boolean_or": 0.0013678431118680997,
+  "nohtml_stop|tf": 0.0021152662054369923,
+  "nohtml_stop|tfidf": 0.14074341108058633,
+  "nohtml_stop|bm25": 0.14628400487667695,
+  "simple|boolean_and": 0.0011027771898434726,
+  "simple|boolean_or": 0.0013732177712054774,
+  "simple|tf": 0.0,
+  "simple|tfidf": 0.14521748980553234,
+  "simple|bm25": 0.113929636639317
+ },
+ "recall": {
+  "nohtml_stop|boolean_and": 0.0008241758241758242,
+  "nohtml_stop|boolean_or": 0.010343333137450783,
+  "nohtml_stop|tf": 0.019690820223274584,
+  "nohtml_stop|tfidf": 0.508407889236204,
+  "nohtml_stop|bm25": 0.40752092284214025,
+  "simple|boolean_and": 0.0008241758241758242,
+  "simple|boolean_or": 0.004537521302227184,
+  "simple|tf": 0.002380952380952381,
+  "simple|tfidf": 0.5015169885466345,
+  "simple|bm25": 0.3078160417854719
+ },
+ "n_topics": {
+  "nohtml_stop|boolean_and": 1211,
+  "nohtml_stop|boolean_or": 1211,
+  "nohtml_stop|tf": 1211,
+  "nohtml_stop|tfidf": 1211,
+  "nohtml_stop|bm25": 1211,
+  "simple|boolean_and": 1211,
+  "simple|boolean_or": 1211,
+  "simple|tf": 1211,
+  "simple|tfidf": 1211,
+  "simple|bm25": 1211
+ },
+ "n_queries_total": 1211,
+ "scorer_trap": {
+  "boolean_and": {
+   "reported": 0.0011027771898434726,
+   "honest": 0.0011027771898434726,
+   "answered": 1211
+  },
+  "boolean_or": {
+   "reported": 0.0013678431118680997,
+   "honest": 0.0013678431118680997,
+   "answered": 1211
+  },
+  "tf": {
+   "reported": 0.0021152662054369923,
+   "honest": 0.0021152662054369923,
+   "answered": 1211
+  },
+  "tfidf": {
+   "reported": 0.14074341108058633,
+   "honest": 0.14074341108058633,
+   "answered": 1211
+  },
+  "bm25": {
+   "reported": 0.14628400487667695,
+   "honest": 0.14628400487667695,
+   "answered": 1211
+  }
+ },
+ "significance": {
+  "bm25 vs tfidf": {
+   "diff": 0.0055405937960906525,
+   "ci_low": -0.018305982163571627,
+   "ci_high": 0.027063577583188825,
+   "significant": false
+  },
+  "tfidf vs tf": {
+   "diff": 0.13862814487514932,
+   "ci_low": 0.11551619952624465,
+   "ci_high": 0.1628745461936752,
+   "significant": true
+  },
+  "tf vs boolean_or": {
+   "diff": 0.0007474230935688926,
+   "ci_low": -0.001602951479460188,
+   "ci_high": 0.0032001316007929177,
+   "significant": false
+  },
+  "boolean_or vs boolean_and": {
+   "diff": 0.00026506592202462704,
+   "ci_low": 0.0,
+   "ci_high": 0.0006653521347302564,
+   "significant": false
+  },
+  "bm25 vs boolean_and": {
+   "diff": 0.1451812276868335,
+   "ci_low": 0.12540353234289378,
+   "ci_high": 0.16633156949057679,
+   "significant": true
+  }
+ },
+ "fit": {
+  "boolean_and": 0.0008422351548976076,
+  "boolean_or": 0.0010045421940771385,
+  "tf": 0.0023026453152195517,
+  "tfidf": 0.13887387055317177,
+  "bm25": 0.14335612164215894
+ },
+ "check": {
+  "boolean_and": 0.0021449453296269326,
+  "boolean_or": 0.0028210467830319438,
+  "tf": 0.0013657497663067545,
+  "tfidf": 0.1514702166017486,
+  "bm25": 0.15979210849800832
+ },
+ "winner": "bm25",
+ "order_holds_on_check": false
+}

@@ -1,0 +1,54 @@
+{
+ "bitcoin": {
+  "reachable": 231,
+  "total": 232
+ },
+ "cardano": {
+  "reachable": 80,
+  "total": 80
+ },
+ "economics": {
+  "reachable": 203,
+  "total": 203
+ },
+ "genealogy": {
+  "reachable": 231,
+  "total": 233
+ },
+ "history": {
+  "reachable": 2528,
+  "total": 2546
+ },
+ "hsm": {
+  "reachable": 251,
+  "total": 252
+ },
+ "iota": {
+  "reachable": 27,
+  "total": 29
+ },
+ "law": {
+  "reachable": 77,
+  "total": 77
+ },
+ "monero": {
+  "reachable": 121,
+  "total": 122
+ },
+ "politics": {
+  "reachable": 281,
+  "total": 283
+ },
+ "quant": {
+  "reachable": 60,
+  "total": 61
+ },
+ "travel": {
+  "reachable": 188,
+  "total": 190
+ },
+ "workplace": {
+  "reachable": 73,
+  "total": 73
+ }
+}

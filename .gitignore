@@ -20,6 +20,12 @@ runs/**/*.trec
 runs/scratch/
 cache/
 
+# Danh sách tài liệu thô của mỗi lần chạy. Rất lớn (diagnostics_runs.json
+# nặng 37,7 MB) và tái tạo được: xoá đi là notebook tự chạy lại.
+# Phần ĐIỂM SỐ thì vẫn commit -- đó mới là thứ cần đọc lại sau này.
+notebooks/results/*_runs.json
+results/*_runs.json
+
 # --- Python ----------------------------------------------------------------
 __pycache__/
 *.pyc
