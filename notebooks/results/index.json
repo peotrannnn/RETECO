@@ -36,9 +36,75 @@
    "rerank": null,
    "fuse": null
   },
-  "when": "2026-09-20T16:59:47+00:00",
+  "when": "2026-09-23T06:42:51+00:00",
   "aliases": [
    "bm25_tuned_with_null_rerank"
   ]
+ },
+ "81353d99b661": {
+  "name": "bm25_tuned_dedup_e1",
+  "split": "train",
+  "system": {
+   "retrieve": {
+    "kind": "sparse",
+    "query_form": "title_weighted",
+    "tokenizer": "nohtml_stop",
+    "model": "bm25",
+    "k1": 2.0,
+    "b": 0.9,
+    "depth": 100
+   },
+   "dedup": {
+    "kind": "content_hash",
+    "expand": 1
+   },
+   "rerank": null,
+   "fuse": null
+  },
+  "when": "2026-09-23T06:42:56+00:00"
+ },
+ "9bfc734c9e7c": {
+  "name": "bm25_tuned_dedup_e2",
+  "split": "train",
+  "system": {
+   "retrieve": {
+    "kind": "sparse",
+    "query_form": "title_weighted",
+    "tokenizer": "nohtml_stop",
+    "model": "bm25",
+    "k1": 2.0,
+    "b": 0.9,
+    "depth": 100
+   },
+   "dedup": {
+    "kind": "content_hash",
+    "expand": 2
+   },
+   "rerank": null,
+   "fuse": null
+  },
+  "when": "2026-09-23T06:42:57+00:00"
+ },
+ "c4c9b2577b4a": {
+  "name": "bm25_tuned_dedup_e3",
+  "split": "train",
+  "system": {
+   "retrieve": {
+    "kind": "sparse",
+    "query_form": "title_weighted",
+    "tokenizer": "nohtml_stop",
+    "model": "bm25",
+    "k1": 2.0,
+    "b": 0.9,
+    "depth": 100
+   },
+   "dedup": {
+    "kind": "content_hash",
+    "expand": 3
+   },
+   "rerank": null,
+   "fuse": null
+  },
+  "when": "2026-09-23T06:42:59+00:00"
  }
 }

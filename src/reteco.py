@@ -13,6 +13,8 @@ Contents
     Splitting    make_split, restrict
     Ceilings     rerank_ceiling
     Statistics   bootstrap_macro_diff
+    Duplicates   content_key, duplicate_groups, collapse, expand_groups
+    Fusion       reciprocal_rank_fusion
 
 The BM25 here is a fast reimplementation of the starter kit's
 `RETECO/starter_kit/bm25.py`. It must produce identical rankings; the notebook
@@ -20,6 +22,7 @@ verifies that rather than assuming it (see `reference_bm25_search`).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from array import array
@@ -953,3 +956,108 @@ def bootstrap_macro_diff(results_a, results_b, metric="per_query_ndcg",
     point = float(np.mean([d.mean() for d in per_domain]))
     low, high = (float(x) for x in np.percentile(macro_draws, [2.5, 97.5]))
     return point, low, high, (low > 0 or high < 0)
+
+
+# ------------------------------------------------- duplicate text groups --
+def content_key(text):
+    """Stable key for "these two documents are the same text".
+
+    Whitespace is collapsed and case is folded first, so a copy that differs
+    only in line wrapping still lands in the same group. The EDA in notebook
+    01a used a raw byte hash; this is slightly looser and finds a few more
+    copies, which is the safer direction for a stage whose job is to stop
+    copies from eating slots.
+    """
+    return hashlib.sha1(
+        re.sub(r"\s+", " ", (text or "")).strip().lower().encode("utf-8")
+    ).digest()
+
+
+def duplicate_groups(doc_ids, doc_texts):
+    """-> {doc_id: canonical_id} for documents that have at least one twin.
+
+    A document with no twin is absent from the map; callers treat "absent"
+    as "its own canonical". Storing only the duplicated documents keeps the
+    map at roughly a third of the corpus rather than all of it.
+
+    The canonical is the first id in corpus order. Which member is canonical
+    is arbitrary and, importantly, is NOT a guess at which member the qrels
+    marked relevant -- see `expand_groups` for why that matters.
+    """
+    first = {}
+    members = {}
+    for doc_id, text in zip(doc_ids, doc_texts):
+        key = content_key(text)
+        if key in first:
+            members.setdefault(first[key], [first[key]]).append(doc_id)
+        else:
+            first[key] = doc_id
+    return {member: canonical
+            for canonical, group in members.items()
+            for member in group}
+
+
+def collapse(ranked_ids, canonical_of):
+    """Keep the first id of each text, in rank order.
+
+    Returns (kept, twins): `kept` is the shortened list, `twins` maps each
+    kept id to the ids that were dropped behind it, in the order they were
+    ranked. `twins` is what makes the collapse reversible.
+    """
+    kept, twins, seen = [], {}, {}
+    for doc_id in ranked_ids:
+        canonical = canonical_of.get(doc_id, doc_id)
+        if canonical in seen:
+            twins.setdefault(seen[canonical], []).append(doc_id)
+        else:
+            seen[canonical] = doc_id
+            kept.append(doc_id)
+    return kept, twins
+
+
+def expand_groups(ranked_ids, twins, max_per_group=1, limit=None):
+    """Put dropped twins back, at most `max_per_group` ids per text.
+
+    This exists because the qrels do not always mark every copy of a text.
+    Measured on `quant`, five duplicate groups have some copies marked
+    relevant and some not, so returning the wrong member of a group scores
+    zero on a text that is word-for-word the answer.
+
+    max_per_group = 1   trust the collapse; every slot holds a different text
+    max_per_group = n   hedge; spend up to n slots covering one text's ids
+
+    Which is better is an empirical question about this corpus, and notebook
+    07a measures it rather than assuming.
+    """
+    out = []
+    for doc_id in ranked_ids:
+        out.append(doc_id)
+        if max_per_group > 1:
+            out.extend(twins.get(doc_id, [])[:max_per_group - 1])
+        if limit and len(out) >= limit:
+            return out[:limit]
+    return out[:limit] if limit else out
+
+
+# ------------------------------------------------------------- fusion --
+def reciprocal_rank_fusion(runs, k=60, top_k=None):
+    """Merge several ranked lists of the same query into one.
+
+    score(d) = SUM over runs of 1 / (k + rank(d))
+
+    Rank, not score, is what gets combined. Two retrieval models can put
+    their scores on completely different scales -- BM25 sums unbounded term
+    weights while Query Likelihood sums log-probabilities that are always
+    negative -- so adding or averaging their scores compares nothing. Ranks
+    are on the same scale by construction.
+
+    `k` damps the top of each list. With k = 60 the gap between rank 1 and
+    rank 2 is small enough that a document needs support from more than one
+    run to reach the top, which is the entire point of fusing.
+    """
+    totals = {}
+    for ranked_ids in runs:
+        for rank, doc_id in enumerate(ranked_ids, start=1):
+            totals[doc_id] = totals.get(doc_id, 0.0) + 1.0 / (k + rank)
+    order = sorted(totals, key=lambda d: (-totals[d], d))
+    return order[:top_k] if top_k else order

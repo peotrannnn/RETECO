@@ -44,14 +44,18 @@ vậy ở `05`, khi chỉnh `k1` và `b` nâng điểm 29%.
 | `06a_indexing` | Chỉ mục ngược, xử lý truy vấn | 5 | CPU | xong |
 | `06b_pipeline` | Khung mô-đun | — | CPU | xong |
 | `06b` mục 9 | Đủ bộ độ đo, phân tích ca | 6 | CPU | xong |
-| `07a_dedup` | Khử trùng lặp | 6 | CPU | chưa làm |
-| `07b_rerank` | Xếp hạng lại từ độ sâu 1000 | 6 | GPU | chưa làm |
-| `07c_dense` | Mô hình hiểu ngữ nghĩa | 6 | GPU | chưa làm |
-| `07d_hybrid` | Kết hợp | 6 | CPU | chưa làm |
-| `08_final` | Chạy `dev`, đủ bộ độ đo, tổng hợp | 6 | CPU | chưa làm |
+| `07a_dedup` | Khử trùng lặp | 6 | CPU | đã viết |
+| `07b_rerank` | Lấy sâu rồi xếp hạng lại | 6 | GPU | đã viết |
+| `07c_dense` | Mô hình ngữ nghĩa | 6 | GPU | đã viết |
+| `07d_hybrid` | Kết hợp, chọn bài nộp | 6 | CPU | đã viết |
+| `08_final` | Chạy `dev` một lần, đóng gói | 6 | CPU | đã viết |
 
-Cột **HM** là số thứ tự hạng mục trong đề cương. Cột **Trạng thái** nhận hai
-giá trị: `xong` là đã chạy, `chưa làm` là còn lại trong kế hoạch.
+Cột **HM** là số thứ tự hạng mục trong đề cương. Cột **Trạng thái** nhận ba
+giá trị: `xong` là đã viết và đã chạy, `đã viết` là ô lệnh có sẵn nhưng chưa
+chạy lần nào, `chưa làm` là còn trong kế hoạch.
+
+Toàn bộ notebook của dự án đã viết xong. Phần còn lại là chạy chúng, và chỗ
+tốn thời gian là hai notebook cần GPU.
 
 Ba dòng ghi "mục" là các phần thêm vào cuối notebook có sẵn, không phải
 notebook riêng. Sáu hạng mục của đề cương đã đủ trên tập `train`.
@@ -70,17 +74,20 @@ Danh sách này mở. Thí nghiệm mới nhận chữ cái tiếp theo trong nh
                                                                  │
                                        ┌──── PHAN DAY THU HANG ───┤
                                        ▼                          │
-                                  07a  khu trung lap              │
+                                  07a  khu trung lap    CPU       │
                                        ▼                          │
-                                  07b  xep hang lai ← buoc lon    │
+                                  07b  xep hang lai     GPU       │
                                        ▼                          │
-                                  07c  mo hinh ngu nghia          │
+                                  07c  mo hinh ngu nghia GPU      │
                                        ▼                          │
-                                  07d  ket hop                    │
+                                  07d  ket hop           CPU      │
                                        └───────────┬──────────────┘
                                                    ▼
-                                      08   dev mot lan + tong hop
+                                      08   dev mot lan + dong goi
 ```
+
+Hai notebook đánh dấu GPU không chạy GPU tại chỗ. Chúng xuất một gói việc, và
+gói đó chạy ở máy khác. Phần 8 mô tả cách gửi đi và nhận về.
 
 ### Vì sao thứ tự này
 
@@ -101,9 +108,13 @@ Mục 9 của `06b` cần `results/runs/` đã có sẵn, tức là cần mục 
 | Làm tới | Được gì |
 | --- | --- |
 | Hiện tại | Đủ hạng mục 1 tới 6 trên tập `train` |
-| `08` | Thêm kết quả trên `dev`, đủ đề cương |
+| `07a` | Thêm vào đó một chặng khử trùng lặp đã đo, vẫn chỉ cần CPU |
 | `07b` | Đủ đề cương và có kết quả tốt |
 | `07d` | Đủ điều kiện nhắm top 3 |
+| `08` | Số liệu trên `dev` và bài nộp đóng gói xong |
+
+`08` chạy được ngay sau bất kỳ mốc nào ở trên: nó lấy hệ thống cao điểm nhất
+hiện có. Nhưng `dev` chỉ chạy một lần, nên chạy `08` sớm là tiêu mất lần đó.
 
 ---
 
@@ -448,6 +459,20 @@ retrieve  ──►  dedup  ──►  rerank  ──►  fuse
 Mỗi chặng đánh dấu bằng mã băm của cấu hình nó cộng mọi chặng phía trên. Đổi
 chặng cuối thì các chặng trước lấy từ cache.
 
+### Các loại chặng đã cài
+
+| Chặng | `kind` | Việc |
+| --- | --- | --- |
+| retrieve | `sparse` | `bm25`, `tfidf`, `qlm`, `tf`, boolean — chạy CPU |
+| retrieve | `gpu_job` | Danh sách do máy GPU dựng, ví dụ truy xuất bằng vector |
+| dedup | `content_hash` | Gộp bản sao, `expand` điều khiển việc trả lại |
+| rerank | `gpu_job` | Sắp lại theo điểm cross-encoder tính ở máy GPU |
+| fuse | `rrf` | Reciprocal rank fusion với các hệ thống khác |
+| bất kỳ | `null` | Bỏ qua, và **không vào mã băm** |
+
+Người thứ hai thêm loại mới bằng `@P.register("rerank", "ten_moi")` từ file
+của mình. Không phải sửa `pipeline.py`.
+
 ```python
 import pipeline as P
 P.configure(DATA, "results")
@@ -473,14 +498,79 @@ P.failure_breakdown(h)          # scored / recoverable / unreachable
 `P.SCORE_VERSION`. File điểm cũ ghi trước khi có các độ đo đó sẽ tự được chấm
 lại — chấm lại đọc từ `results/runs/`, không truy xuất lại lần nào.
 
-Ba thư mục hai người cùng ghi:
+### Gửi việc sang máy có GPU
+
+Phần GPU nằm ở máy khác, nên khung tách hẳn việc đó ra thành một gói file:
 
 ```text
-systems/<tên>.json            định nghĩa hệ thống
-results/runs/<hash>.jsonl     danh sách trả về      (không commit)
-results/scores/<hash>.json    điểm                  (commit)
-results/index.json            tra ngược hash        (commit)
+máy CPU                                máy GPU
+--------                               --------
+P.export_gpu_job(...)  ──► gpu_jobs/<job_id>/
+                                       python gpu_worker.py <job_id> --data ...
+                           scores.jsonl ◄──
+P.import_gpu_scores(...) ◄──
+{"rerank": {"kind": "gpu_job", "job": "<job_id>"}}
 ```
+
+| Việc | Hàm hoặc lệnh |
+| --- | --- |
+| Xuất gói | `P.export_gpu_job(hash, thư_mục, job_id, task=...)` |
+| Chạy ở máy GPU | `python gpu_worker.py <thư_mục> --data <kho>` |
+| Nhận về | `P.import_gpu_scores(đường_dẫn, job_id)` |
+
+`gpu_worker.py` không import gì từ dự án. Máy GPU chỉ cần file đó, thư mục gói
+việc, và `pip install torch sentence-transformers`.
+
+Hai lựa chọn khi xuất:
+
+| `with_text` | Gói nặng | Máy GPU cần |
+| --- | --- | --- |
+| `False` | vài chục MB | Có sẵn kho `track1_tempo` |
+| `True` | hàng trăm MB | Không cần gì thêm |
+
+`job_id` nằm trong cấu hình hệ thống nên nó **vào mã băm**. Hai hệ thống dùng
+hai gói khác nhau là hai mã băm khác nhau và không lẫn vào nhau được. Gói việc
+giữ lại được nên người khác chạy đúng gói đó với đúng mô hình đó sẽ ra đúng số
+đó.
+
+`gpu_worker.py` ghi kết quả theo từng nhóm. Phiên làm việc bị ngắt giữa chừng
+thì chạy lại đúng lệnh cũ, nó đọc phần đã xong và làm tiếp từ chỗ dừng.
+
+### Trang so sánh chạy local
+
+```bash
+python src/report.py --results notebooks/results --open
+```
+
+Sinh `notebooks/results/report.html`: bảng mọi hệ thống, sắp xếp được theo từng
+cột, bấm một dòng để xem điểm từng nhóm và cấu hình, chọn hai hệ thống để xem
+chênh lệch theo nhóm.
+
+Trang tự chứa số liệu nên không cần server, mở bằng trình duyệt là xong, và gửi
+qua email cho người khác cũng xem được. Nó đọc `results/scores/` và
+`results/index.json`, hai thứ đều có commit, nên người vừa clone về cũng xem
+được ngay mà không chạy lại gì.
+
+Hệ thống chạy trên `dev` được tách riêng và xếp cuối bảng. Điểm `dev` và điểm
+`train` đo trên hai tập câu truy vấn khác nhau, nên trang từ chối vẽ biểu đồ
+chênh lệch giữa hai tập và nói rõ lý do thay vì vẽ một biểu đồ vô nghĩa.
+
+### Các thư mục hai người cùng ghi
+
+```text
+systems/<tên>.json            định nghĩa hệ thống       (commit)
+gpu_jobs/<job_id>/            gói việc gửi máy GPU      (không commit)
+results/runs/<hash>.jsonl     danh sách trả về          (không commit)
+results/scores/<hash>.json    điểm                      (commit)
+results/dup_groups/<nhóm>.json bảng nhóm bản sao        (không commit)
+results/gpu/<job_id>.jsonl    điểm GPU đã nhận          (không commit)
+results/index.json            tra ngược hash            (commit)
+results/report.html           trang so sánh             (không commit)
+```
+
+Quy tắc: thứ **suy ra được** thì không commit, thứ **là quyết định** thì commit.
+Điểm số và định nghĩa hệ thống là quyết định. Danh sách tài liệu thô thì sinh
+lại được từ định nghĩa.
 
 Cổng kiểm tra ở `06b` mục 3 đã chạy: khung cho lại đúng con số của `05`, sai số
 **0,00e+00**.
@@ -525,17 +615,23 @@ Việc giao được ngay, không chặn việc đang chạy:
 
 ## Phần 11 — Việc tiếp theo
 
-Sáu hạng mục của đề cương đã đủ trên tập `train`. Từ đây là phần đẩy thứ hạng.
+Sáu hạng mục của đề cương đã đủ trên tập `train`, và mọi notebook đã viết
+xong. Từ đây là phần chạy.
 
-| # | Việc | Chi phí | Được gì |
-| :-: | --- | --- | --- |
-| 1 | `qlm` vs `bm25` đã tinh chỉnh — chạy kiểm định | 30 phút | Chốt tầng một |
-| 2 | `07a` — khử trùng lặp | 20 phút | Giảm chi phí GPU, dọn top-k |
-| 3 | `07b` — xếp hạng lại từ độ sâu 1000 | GPU 40 phút | Bước tăng điểm lớn nhất |
-| 4 | `07c`, `07d` | GPU | Đẩy thứ hạng |
-| 5 | `08` — chạy `dev` một lần, tổng hợp | 1 giờ | Số liệu cuối cùng |
+| # | Việc | Máy | Chi phí | Được gì |
+| :-: | --- | :-: | --- | --- |
+| 1 | `07a` — khử trùng lặp | CPU | 30 phút | Dọn đường cho `07b`, đo `expand` |
+| 2 | `07b` — lấy sâu, xếp hạng lại | CPU + GPU | 1 giờ | Bước tăng điểm lớn nhất |
+| 3 | `qlm` vs `bm25` đã tinh chỉnh — kiểm định | CPU | 30 phút | Chốt tầng một, phục vụ báo cáo |
+| 4 | `07c` — mô hình ngữ nghĩa | GPU | vài giờ | Ứng viên khác loại |
+| 5 | `07d` — kết hợp | CPU | 30 phút | Chọn bài nộp |
+| 6 | `08` — chạy `dev` một lần | CPU + GPU | 1 giờ | Số liệu cuối, bài nộp |
 
-### Về việc 1
+Việc 1 và 2 là đường ngắn nhất tới điểm cao hơn. Việc 3 không chặn gì, giao cho
+người thứ hai được. Việc 4 là việc đắt nhất và có trần thấp nhất, vì 99,3% đáp
+án vẫn nằm trong tầm với của cách tìm theo từ khoá.
+
+### Về việc 3 — chốt tầng một
 
 Mục 11 của `04` cho `qlm` 0,1839, còn `05` cho `bm25` đã tinh chỉnh 0,1867.
 Hai con số chênh nhau 0,0028, nhỏ hơn nhiều so với độ rộng khoảng tin cậy của
@@ -549,11 +645,38 @@ hai.
 Cũng đáng quét `mu` mịn hơn trong khoảng 500–2000, vì `mu` = 500 và `mu` = 1000
 chỉ chênh nhau 0,0010 trên `fit`, tức là đỉnh của đường cong khá phẳng.
 
-### Về việc 3
+### Về việc 2 — vì sao nâng độ sâu trước
 
 Tầng một chọn theo cột `ceiling`, không theo cột `nDCG@10`. Cấu hình đang chốt:
-`k1 = 2,0`, `b = 0,9`, lấy về độ sâu 1000. Nếu việc 1 kết luận `qlm` thắng thì
-cấu hình này đổi theo.
+`k1 = 2,0`, `b = 0,9`. Nếu việc 3 kết luận `qlm` thắng thì cấu hình này đổi
+theo.
 
-Lý do phải nâng độ sâu trước khi xếp hạng lại nằm ở Phần 3 mục 3: ở độ sâu 100
-có 23,0% số câu mà đáp án không hề nằm trong danh sách ứng viên.
+Ở độ sâu 100 có **23,0% số câu mà đáp án không hề nằm trong danh sách ứng
+viên** (Phần 3 mục 3). Không bộ xếp hạng lại nào cứu được nhóm đó, nên nâng độ
+sâu là việc phải làm *trước*, không phải tùy chọn.
+
+Nâng độ sâu gần như không tốn thêm. Việc đắt là dựng chỉ mục, và nó chạy một
+lần bất kể lấy 100 hay 2000; chỉ có kích thước lát cắt là đổi.
+
+Khử trùng lặp ở việc 1 đi cùng lý do đó. Đo trên danh sách 100 ứng viên hiện
+tại, `bitcoin` chỉ còn 49,0 nội dung khác nhau, tức là **51% số chỗ là bản
+sao**. Gộp trước khi gửi sang GPU thì cùng một ngân sách nhận được gần gấp đôi
+nội dung thật.
+
+### Chạy theo thứ tự, kèm lệnh
+
+```bash
+# 1. khu trung lap            notebook 07a, chay het
+# 2. lay sau + xuat goi viec  notebook 07b, muc 1 toi 3
+
+# tren may GPU
+pip install torch sentence-transformers
+python gpu_worker.py rerank_01 --data reteco_data/track1_tempo
+
+# 3. nhan ve va xep hang lai  notebook 07b, muc 4 tro di
+# 4. chon bai nop             notebook 07d
+# 5. chay dev mot lan         notebook 08
+
+# xem lai moi thu bat cu luc nao
+python src/report.py --results notebooks/results --open
+```

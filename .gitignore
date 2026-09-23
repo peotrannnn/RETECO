@@ -32,6 +32,18 @@ results/*_runs.json
 notebooks/results/terms_selected.txt
 results/terms_selected.txt
 
+# Bảng nhóm bản sao (mục 1 của 07a). 49 MB, suy ra được bằng một lượt quét
+# kho khoảng 8 phút: P.build_dup_groups(). Phần KẾT LUẬN rút ra từ nó
+# (dedup_summary.json) thì vẫn commit.
+notebooks/results/dup_groups/
+results/dup_groups/
+
+# Điểm do máy GPU trả về, và gói việc gửi đi. Tái tạo được từ cấu hình hệ
+# thống cộng với mô hình đã ghi trong job.json.
+notebooks/results/gpu/
+results/gpu/
+gpu_jobs/
+
 # Đầu ra của khung ở notebook 06b.
 #   runs/   danh sách tài liệu, rất lớn, tái tạo được từ cấu hình
 #   scores/ và index.json thì VẪN COMMIT: đó là thứ hai người ghép với nhau

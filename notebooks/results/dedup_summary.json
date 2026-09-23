@@ -1,0 +1,84 @@
+{
+ "corpus_documents": 1654055,
+ "corpus_distinct": 1167099,
+ "corpus_duplicate_share": 0.29440133490119735,
+ "candidate_waste_share": 0.2639223781998349,
+ "per_domain_waste": {
+  "bitcoin": 0.5102857142857142,
+  "cardano": 0.2630555555555556,
+  "economics": 0.15793103448275858,
+  "genealogy": 0.20350000000000001,
+  "history": 0.2981461675579322,
+  "hsm": 0.20114285714285718,
+  "iota": 0.07857142857142863,
+  "law": 0.08125000000000004,
+  "monero": 0.36347826086956525,
+  "politics": 0.18704761904761902,
+  "quant": 0.11416666666666664,
+  "travel": 0.20014285714285718,
+  "workplace": 0.1996
+ },
+ "gold_with_twin": 47,
+ "expand_measured": {
+  "no dedup": {
+   "fit": 0.17970957718561473,
+   "check": 0.22149200957116966,
+   "ndcg": 0.18665259659453692,
+   "recall": 0.5124651839567098,
+   "ceiling": 0.5717638214973753
+  },
+  "expand=1": {
+   "fit": 0.18709789375125607,
+   "check": 0.23124267124139208,
+   "ndcg": 0.19442172523128984,
+   "recall": 0.5034182563062898,
+   "ceiling": 0.563510974980763
+  },
+  "expand=2": {
+   "fit": 0.1831967056253544,
+   "check": 0.22682710176340398,
+   "ndcg": 0.19050568544221685,
+   "recall": 0.5116330450810926,
+   "ceiling": 0.5711007860149847
+  },
+  "expand=3": {
+   "fit": 0.1811130859198418,
+   "check": 0.22313766153810943,
+   "ndcg": 0.18809610491769613,
+   "recall": 0.5116330450810926,
+   "ceiling": 0.5711007860149847
+  }
+ },
+ "chosen_expand": 2,
+ "rerank_depth": 2043,
+ "target_distinct": 1000,
+ "significance": {
+  "expand=1 vs no dedup": {
+   "diff": 0.007388316565641331,
+   "ci_low": 0.0026334868470245278,
+   "ci_high": 0.011778633695744752,
+   "significant": true,
+   "changed": [
+    "dedup: {'kind': 'content_hash', 'expand': 1} -> None"
+   ]
+  },
+  "expand=1 vs expand=2": {
+   "diff": 0.0039011881259016995,
+   "ci_low": -0.0005274953474831575,
+   "ci_high": 0.007809363644923929,
+   "significant": false,
+   "changed": [
+    "dedup.expand: 1 -> 2"
+   ]
+  },
+  "expand=1 vs expand=3": {
+   "diff": 0.005984807831414283,
+   "ci_low": 0.0013641678285829652,
+   "ci_high": 0.010177480461677524,
+   "significant": true,
+   "changed": [
+    "dedup.expand: 1 -> 3"
+   ]
+  }
+ }
+}

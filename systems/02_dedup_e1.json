@@ -1,0 +1,19 @@
+{
+  "name": "bm25_tuned_dedup_e1",
+  "note": "content-hash dedup, up to 1 ids per text",
+  "retrieve": {
+    "kind": "sparse",
+    "query_form": "title_weighted",
+    "tokenizer": "nohtml_stop",
+    "model": "bm25",
+    "k1": 2.0,
+    "b": 0.9,
+    "depth": 100
+  },
+  "dedup": {
+    "kind": "content_hash",
+    "expand": 1
+  },
+  "rerank": null,
+  "fuse": null
+}

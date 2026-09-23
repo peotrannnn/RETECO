@@ -1,0 +1,17 @@
+{
+  "name": "stage1_deep",
+  "note": "first stage for 07b: depth 2043, dedup to distinct texts, expand=2",
+  "retrieve": {
+    "kind": "sparse",
+    "query_form": "title_weighted",
+    "tokenizer": "nohtml_stop",
+    "model": "bm25",
+    "k1": 2.0,
+    "b": 0.9,
+    "depth": 2043
+  },
+  "dedup": {
+    "kind": "content_hash",
+    "expand": 2
+  }
+}

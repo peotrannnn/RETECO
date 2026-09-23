@@ -296,7 +296,7 @@ def _retrieve_sparse(incoming, config, split):
         index = R.RetrievalIndex(
             doc_ids, doc_texts, tokenizer=tokenizer, weighting=model,
             k1=float(config.get("k1", 0.9)), b=float(config.get("b", 0.4)),
-            keep_counts=False)
+            mu=float(config.get("mu", 2000.0)), keep_counts=False)
 
         per_query = {}
         for qid, text in queries:
@@ -306,8 +306,8 @@ def _retrieve_sparse(incoming, config, split):
         ranked[domain] = per_query
 
         del index, doc_ids, doc_texts
-        print(f"    [{i:>2}/13] {domain:<12}{time.time() - t0:>6.0f}s",
-              flush=True)
+        print(f"    [{i:>2}/{len(domains())}] {domain:<12}"
+              f"{time.time() - t0:>6.0f}s", flush=True)
     return ranked
 
 
@@ -316,6 +316,259 @@ def _retrieve_sparse(incoming, config, split):
 @register("fuse", "none")
 def _identity(incoming, config, split):
     return incoming
+
+
+# ------------------------------------------------- duplicate text groups --
+def _groups_dir():
+    return _RESULTS / "dup_groups"
+
+
+def build_dup_groups(force=False):
+    """One pass over the corpus, writing {doc_id: canonical_id} per domain.
+
+    Only documents that actually have a twin are written, so the files hold
+    roughly a third of the corpus rather than all of it. Built once; every
+    later dedup run reads these files instead of re-reading 4 GB of text.
+    """
+    _require()
+    _groups_dir().mkdir(parents=True, exist_ok=True)
+    summary = {}
+    for i, domain in enumerate(domains(), start=1):
+        path = _groups_dir() / f"{domain}.json"
+        if path.exists() and not force:
+            mapping = json.loads(path.read_text(encoding="utf-8"))
+        else:
+            t0 = time.time()
+            doc_ids, doc_texts = R.load_corpus(_DATA / domain / "documents.jsonl")
+            mapping = R.duplicate_groups(doc_ids, doc_texts)
+            path.write_text(json.dumps(mapping), encoding="utf-8")
+            print(f"    [{i:>2}/{len(domains())}] {domain:<12}"
+                  f"{len(doc_ids):>9,} docs{time.time() - t0:>6.0f}s", flush=True)
+            del doc_ids, doc_texts
+        canonicals = set(mapping.values())
+        summary[domain] = {"in_groups": len(mapping), "groups": len(canonicals)}
+    return summary
+
+
+def _load_groups(domain):
+    path = _groups_dir() / f"{domain}.json"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} is missing. Run pipeline.build_dup_groups() once "
+            f"(notebook 07a does this) before using a dedup stage.")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+@register("dedup", "content_hash")
+def _dedup_content_hash(incoming, config, split):
+    """Collapse copies of the same text, then optionally put some back.
+
+    Two settings, and they pull in opposite directions:
+
+      keep   how many candidates to carry forward after collapsing. The
+             collapse frees slots, and this decides whether the freed slots
+             are handed back (a deeper list of distinct texts) or dropped.
+      expand how many ids of one text may appear in the final list. 1 trusts
+             the collapse. More than 1 hedges against the qrels marking a
+             copy that is not the one kept.
+    """
+    keep = config.get("keep")
+    expand = int(config.get("expand", 1))
+    out = {}
+    for domain, per_query in incoming.items():
+        canonical_of = _load_groups(domain)
+        result = {}
+        for qid, hits in per_query.items():
+            ids = [doc for doc, _ in hits]
+            score_of = dict(hits)
+            kept, twins = R.collapse(ids, canonical_of)
+            final = R.expand_groups(kept, twins, max_per_group=expand,
+                                    limit=keep)
+            # A twin inherits the score of the id it was ranked behind, so the
+            # list stays sorted and the scores stay meaningful downstream.
+            result[qid] = [(doc, score_of.get(doc, 0.0)) for doc in final]
+        out[domain] = result
+    return out
+
+
+# ------------------------------------------------------- work sent to GPU --
+def _gpu_dir():
+    return _RESULTS / "gpu"
+
+
+def export_gpu_job(digest, out_dir, job_id, task="rerank", split="train",
+                   depth=None, with_text=False, model=None):
+    """Write a self-standing job folder for a machine with a GPU.
+
+    The GPU machine does not need this project. It needs the worker script,
+    the folder this writes, and either a copy of the corpus or `with_text`.
+
+    with_text=False  the worker reads the corpus itself. The folder stays
+                     around 50 MB, which is a file the two machines can pass
+                     around easily.
+    with_text=True   the document text travels too. Self-contained, but the
+                     folder runs to hundreds of megabytes.
+    """
+    _require()
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    ranked = _load_run(digest)
+
+    n_pairs = 0
+    needed = {d: set() for d in ranked}
+    with open(out / "candidates.jsonl", "w", encoding="utf-8") as f:
+        for domain, per_query in ranked.items():
+            for qid, hits in per_query.items():
+                ids = [doc for doc, _ in hits][:depth] if depth else [
+                    doc for doc, _ in hits]
+                needed[domain].update(ids)
+                n_pairs += len(ids)
+                f.write(json.dumps({"d": domain, "q": qid, "i": ids}) + "\n")
+
+    with open(out / "queries.jsonl", "w", encoding="utf-8") as f:
+        for domain in ranked:
+            for qid, text in R.load_queries(
+                    _DATA / domain / _queries_file(split)):
+                f.write(json.dumps({"d": domain, "q": qid, "t": text}) + "\n")
+
+    if with_text:
+        with open(out / "documents.jsonl", "w", encoding="utf-8") as f:
+            for domain, wanted in needed.items():
+                for record in R._read_jsonl(
+                        _DATA / domain / "documents.jsonl"):
+                    if record["id"] in wanted:
+                        f.write(json.dumps({"d": domain, "i": record["id"],
+                                            "t": record["content"] or ""})
+                                + "\n")
+
+    job = {"job_id": job_id, "task": task, "split": split,
+           "from_hash": digest, "depth": depth, "model": model,
+           "pairs": n_pairs, "with_text": with_text,
+           "domains": sorted(ranked)}
+    (out / "job.json").write_text(json.dumps(job, indent=1), encoding="utf-8")
+
+    print(f"wrote {out}")
+    print(f"  job_id  {job_id}")
+    print(f"  pairs   {n_pairs:,}")
+    print(f"  corpus  {'included' if with_text else 'read by the worker'}")
+    return job
+
+
+def import_gpu_scores(path, job_id=None):
+    """Take `scores.jsonl` back from the GPU machine.
+
+    The file is stored under its job id. A rerank or dense stage naming that
+    job id then finds it, which is what lets a system definition describe a
+    run that was produced on another machine.
+    """
+    _require()
+    _gpu_dir().mkdir(parents=True, exist_ok=True)
+    rows = [json.loads(line) for line in
+            Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    if job_id is None:
+        job_id = rows[0].get("job_id") if rows else None
+    if not job_id:
+        raise ValueError("job_id not given and not present in the file")
+
+    target = _gpu_dir() / f"{job_id}.jsonl"
+    with open(target, "w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row) + "\n")
+    queries = len({r["q"] for r in rows})
+    print(f"imported {queries:,} queries into {target}")
+    return job_id
+
+
+def _load_gpu_scores(job_id):
+    path = _gpu_dir() / f"{job_id}.jsonl"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} is missing. Run the worker on the GPU machine, then "
+            f"pipeline.import_gpu_scores(<its scores.jsonl>, '{job_id}').")
+    out = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            row = json.loads(line)
+            out.setdefault(row["d"], {})[row["q"]] = list(
+                zip(row["i"], row["s"]))
+    return out
+
+
+@register("rerank", "gpu_job")
+def _rerank_gpu_job(incoming, config, split):
+    """Reorder each candidate list using scores computed on the GPU machine.
+
+    Only documents the GPU actually scored are reordered. A candidate the
+    worker skipped keeps its place at the bottom rather than vanishing, so a
+    partial job degrades instead of silently shortening every list.
+    """
+    job_id = config["job"]
+    depth = config.get("depth")
+    scored = _load_gpu_scores(job_id)
+
+    out = {}
+    for domain, per_query in incoming.items():
+        domain_scores = scored.get(domain, {})
+        result = {}
+        for qid, hits in per_query.items():
+            new = domain_scores.get(qid)
+            if not new:
+                result[qid] = hits
+                continue
+            ordered = sorted(new, key=lambda pair: (-pair[1], pair[0]))
+            covered = {doc for doc, _ in new}
+            tail = [(doc, s) for doc, s in hits if doc not in covered]
+            merged = ordered + tail
+            result[qid] = merged[:depth] if depth else merged
+        out[domain] = result
+    return out
+
+
+@register("retrieve", "gpu_job")
+def _retrieve_gpu_job(incoming, config, split):
+    """A candidate list produced entirely on the GPU machine.
+
+    Used for dense retrieval, where the expensive part is embedding the whole
+    corpus and belongs wherever the GPU is.
+    """
+    depth = config.get("depth")
+    scored = _load_gpu_scores(config["job"])
+    return {domain: {qid: (hits[:depth] if depth else hits)
+                     for qid, hits in per_query.items()}
+            for domain, per_query in scored.items()}
+
+
+# ---------------------------------------------------------------- fusion --
+@register("fuse", "rrf")
+def _fuse_rrf(incoming, config, split):
+    """Reciprocal rank fusion of this system's list with other saved runs.
+
+    `sources` names other runs by hash or by the name they were registered
+    under. They must already exist in results/runs/, which means they were
+    produced by their own system definition and can be inspected on their own.
+    """
+    k = float(config.get("k", 60))
+    depth = config.get("depth")
+    names = {entry["name"]: h for h, entry in listing().items()}
+    others = [_load_run(names.get(source, source))
+              for source in config.get("sources", [])]
+
+    out = {}
+    for domain, per_query in incoming.items():
+        result = {}
+        for qid, hits in per_query.items():
+            lists = [[doc for doc, _ in hits]]
+            for other in others:
+                extra = other.get(domain, {}).get(qid)
+                if extra:
+                    lists.append([doc for doc, _ in extra])
+            fused = R.reciprocal_rank_fusion(lists, k=k, top_k=depth)
+            # RRF scores are tiny and on their own scale; the rank is what
+            # carries meaning, so the position is written back as the score.
+            result[qid] = [(doc, 1.0 / (k + rank))
+                           for rank, doc in enumerate(fused, start=1)]
+        out[domain] = result
+    return out
 
 
 # ----------------------------------------------------------------- scoring --
@@ -465,12 +718,21 @@ def metrics(digests=None):
     header = f"{'name':<30}" + "".join(f"{label:>10}" for label, _ in columns)
     print(header)
     print("-" * len(header))
+    stale = []
     for r in records:
         row = f"{r['name'][:29]:<30}"
         for _, key in columns:
-            row += f"{r['macro'].get(key, float('nan')):>10.4f}"
+            value = r["macro"].get(key)
+            row += (f"{value:>10.4f}" if value is not None else f"{'-':>10}")
+        if r.get("score_version") != SCORE_VERSION:
+            stale.append(r["hash"])
+            row += "   <- scored before these metrics existed"
         print(row)
     print("-" * len(header))
+    if stale:
+        print("Rescore those rows to fill the gaps; it reads the saved run and")
+        print("retrieves nothing:")
+        print(f"    for h in {stale!r}: P.score(h, force=True)")
     print(f"Every number is a macro average over the {len(domains())} domains.")
     print("P@10 / R@10 / F1@10 ignore the order inside the top 10;")
     print("MAP and nDCG@10 do not.")

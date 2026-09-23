@@ -44,7 +44,7 @@ Ký hiệu trong cột **Trạng thái**:
 | Giá trị | Nghĩa |
 | --- | --- |
 | xong | Đã viết, đã chạy, số liệu nằm sẵn trong notebook |
-| chưa làm | Còn lại trong kế hoạch |
+| chưa làm | Notebook đã viết nhưng chưa chạy, hoặc còn trong kế hoạch |
 | bỏ qua | Cố tình không làm, lý do ghi ở cột bên cạnh |
 
 ### Hạng mục 1 — Bài toán tìm kiếm tài liệu
@@ -122,9 +122,10 @@ Họ công thức BM mà đề cương nhắc tới nằm trong cùng một lư�
 | Mô tả ngữ liệu thử nghiệm | xong | `01a`, `01b` |
 | Có mức độ liên quan phân cấp hay không | xong | **Không** — mọi dòng qrels đều bằng 1 |
 | Bảng kết quả theo NDCG | xong | `02`, `03a`, `04`, `05` |
-| Bảng kết quả theo P, R, F1 | xong | `06b` mục 9 |
-| Bảng kết quả theo P@k, MAP | xong | `06b` mục 9 |
+| Bảng kết quả theo P, R, F1 | xong | `06b` mục 9, `08` mục 3 |
+| Bảng kết quả theo P@k, MAP | xong | `06b` mục 9, `08` mục 3 |
 | Phân tích ca có kết quả cao và thấp | xong | `06b` mục 9 |
+| Kết quả trên tập `dev` | chưa làm | `08` — notebook đã viết, chờ chạy GPU |
 
 Đánh giá chính dùng **nDCG@10 trung bình theo nhóm**, theo đúng quy định của
 ban tổ chức. Qrels chỉ có một mức liên quan, nên nDCG ở đây chạy với mức liên
@@ -195,13 +196,29 @@ notebooks/
     05_ranking_formula.ipynb      Công thức xếp hạng, k1 và b     [HM 4]
     06a_indexing.ipynb            Chỉ mục ngược, xử lý truy vấn   [HM 5]
     06b_pipeline.ipynb            Khung mô-đun, bảng đánh giá     [HM 6]
+    07a_dedup.ipynb               Khử trùng lặp                   [HM 6]
+    07b_rerank.ipynb              Xếp hạng lại, cần GPU           [HM 6]
+    07c_dense.ipynb               Mô hình ngữ nghĩa, cần GPU      [HM 6]
+    07d_hybrid.ipynb              Kết hợp, chọn bài nộp           [HM 6]
+    08_final.ipynb                Chạy dev một lần, đóng gói      [HM 6]
     results/                      Kết quả JSON của mọi notebook
+    results/report.html           Trang so sánh, mở bằng trình duyệt
 
 systems/                          Định nghĩa từng hệ thống (JSON)
+gpu_jobs/                         Gói việc gửi sang máy có GPU
 submissions/                      File nộp định dạng TREC
 reteco_data/                      Dữ liệu (không commit)
 RETECO/                           Bộ công cụ ban tổ chức (không commit)
 ```
+
+`src/` có ba file chạy được ngoài notebook:
+
+| File | Việc |
+| --- | --- |
+| `reteco.py` | Nạp dữ liệu, tách từ, chỉ mục, chấm điểm |
+| `pipeline.py` | Ghép chặng, lưu kết quả, so sánh, xuất bài nộp |
+| `gpu_worker.py` | Chạy trên máy có GPU, độc lập với phần còn lại |
+| `report.py` | Sinh trang so sánh `results/report.html` |
 
 Lộ trình và việc còn lại: xem [`PIPELINE.md`](PIPELINE.md).
 
@@ -222,6 +239,106 @@ git clone https://github.com/DataScienceUIBK/RETECO.git
 Thư viện cần có: `numpy`, `scipy`, `matplotlib`.
 
 Mỗi notebook có biến `DATA` ở ô code đầu tiên — sửa cho khớp máy đang chạy.
+
+### Chạy nhanh trên máy mới
+
+Chép nguyên khối này vào terminal. Khoảng 30 phút, chủ yếu là tải dữ liệu.
+
+```bash
+git clone https://github.com/peotrannnn/RETECO.git RETECO-project
+cd RETECO-project
+
+python -m venv .venv
+.venv\Scripts\activate            # Windows
+# source .venv/bin/activate        # macOS hoac Linux
+
+pip install numpy scipy matplotlib jupyter huggingface_hub
+
+hf download DataScience-UIBK/RETECO-SemEval2027 --repo-type dataset \
+    --local-dir reteco_data --include "track1_tempo/*"
+git clone https://github.com/DataScienceUIBK/RETECO.git
+
+jupyter lab
+```
+
+Sau đó sửa biến `DATA` ở ô code đầu của notebook cho khớp đường dẫn máy mình,
+rồi chạy theo thứ tự `00` → `08`.
+
+### Xem kết quả mà không chạy lại gì
+
+Thư mục `notebooks/results/scores/` và `results/index.json` có commit, nên điểm
+của mọi hệ thống đã đo đều đọc lại được ngay:
+
+```bash
+python src/report.py --results notebooks/results --open
+```
+
+Lệnh này sinh `notebooks/results/report.html` và mở bằng trình duyệt. Trang đó
+tự chứa số liệu, không cần server, gửi qua email cho người khác cũng xem được.
+
+### Chạy lại một hệ thống đã có
+
+```python
+import sys; sys.path.insert(0, "src")
+import pipeline as P
+
+P.configure("reteco_data/track1_tempo", "notebooks/results")
+
+P.table()                                   # moi he thong da do
+P.metrics()                                 # du bo do do
+P.cases(h, n=5)                             # cau cao nhat va thap nhat
+P.explain(h, low)                           # tung cau: dap an nam o hang nao
+P.failure_breakdown(h)                      # ai sua duoc cai gi
+
+h = P.run("systems/01_bm25_tuned.json")     # chay lai, cache thi bo qua
+P.score(h)
+P.compare(h_a, h_b, part="fit")             # kiem dinh bootstrap
+```
+
+### Thêm một hệ thống mới
+
+Viết một file JSON vào `systems/`, không phải sửa code:
+
+```json
+{
+  "name": "bm25_b075",
+  "retrieve": {"kind": "sparse", "query_form": "title_weighted",
+               "tokenizer": "nohtml_stop", "model": "bm25",
+               "k1": 2.0, "b": 0.75, "depth": 1000},
+  "dedup":  {"kind": "content_hash", "expand": 2},
+  "rerank": null,
+  "fuse":   null
+}
+```
+
+```bash
+python -c "import sys; sys.path.insert(0,'src'); import pipeline as P; \
+  P.configure('reteco_data/track1_tempo','notebooks/results'); \
+  h=P.run('systems/08_bm25_b075.json'); P.score(h); P.table()"
+```
+
+Chặng nào ghi `null` thì bỏ qua, và nó **không vào mã băm**, nên thêm
+`"rerank": null` vào một hệ thống cũ không làm mất bộ nhớ đệm của nó.
+
+### Chạy phần GPU ở máy khác
+
+```bash
+# tren may nay: xuat goi viec (notebook 07b lam viec nay)
+# roi chep thu muc gpu_jobs/<job_id>/ va src/gpu_worker.py sang may GPU
+
+# tren may GPU
+pip install torch sentence-transformers
+python gpu_worker.py <job_id> --data reteco_data/track1_tempo
+
+# chep <job_id>/scores.jsonl ve, roi tren may nay
+python -c "import sys; sys.path.insert(0,'src'); import pipeline as P; \
+  P.configure('reteco_data/track1_tempo','notebooks/results'); \
+  P.import_gpu_scores('gpu_jobs/<job_id>/scores.jsonl')"
+```
+
+`gpu_worker.py` không import gì từ dự án, nên máy GPU chỉ cần file đó và thư
+mục gói việc. Nó ghi kết quả theo từng nhóm, nên phiên bị ngắt giữa chừng thì
+chạy lại đúng lệnh cũ là làm tiếp từ chỗ dừng.
 
 ---
 
@@ -371,6 +488,29 @@ nằm ngay hạng 1.
 Năm câu điểm thấp nhất chia làm hai kiểu. Ba câu có đáp án **không nằm trong
 100 ứng viên**; hai câu còn lại có đáp án ở hạng 22 và 31, tức là đã tìm ra
 nhưng xếp chưa đủ cao.
+
+---
+
+### Bản sao chiếm chỗ trong danh sách ứng viên (`07a`)
+
+Đo trên chính danh sách 100 ứng viên mà hệ thống đã chốt trả về:
+
+| Nhóm | Số nội dung khác nhau trong 100 ứng viên | Chỗ bị bản sao chiếm |
+| --- | --- | --- |
+| bitcoin | 49,0 | **51,0%** |
+| monero | 64,1 | 35,9% |
+| history | 70,3 | 29,7% |
+| cardano | 73,9 | 26,1% |
+
+Trên `bitcoin`, một nửa danh sách ứng viên là cùng một văn bản lặp lại dưới mã
+khác. Ở bước xếp hạng lại, một nửa chi phí GPU dùng để chấm lại nội dung đã
+chấm rồi.
+
+Cái bẫy đi kèm: danh sách đáp án **không đánh dấu mọi bản sao**. Đo trên
+`quant`, 5 nhóm bản sao chỉ có một phần các bản được đánh dấu đúng, nên gộp
+ngây thơ là điểm 0 cho một văn bản đúng từng chữ. Notebook `07a` giải bằng cách
+gộp lại nhưng giữ đường quay về, và đo xem cho phép bao nhiêu mã của cùng một
+nội dung là vừa.
 
 ---
 
