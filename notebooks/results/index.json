@@ -36,7 +36,7 @@
    "rerank": null,
    "fuse": null
   },
-  "when": "2026-09-23T06:42:51+00:00",
+  "when": "2026-09-23T12:36:56+00:00",
   "aliases": [
    "bm25_tuned_with_null_rerank"
   ]
@@ -61,7 +61,8 @@
    "rerank": null,
    "fuse": null
   },
-  "when": "2026-09-23T06:42:56+00:00"
+  "when": "2026-09-23T12:36:57+00:00",
+  "aliases": []
  },
  "9bfc734c9e7c": {
   "name": "bm25_tuned_dedup_e2",
@@ -83,7 +84,8 @@
    "rerank": null,
    "fuse": null
   },
-  "when": "2026-09-23T06:42:57+00:00"
+  "when": "2026-09-23T12:36:58+00:00",
+  "aliases": []
  },
  "c4c9b2577b4a": {
   "name": "bm25_tuned_dedup_e3",
@@ -105,6 +107,7 @@
    "rerank": null,
    "fuse": null
   },
-  "when": "2026-09-23T06:42:59+00:00"
+  "when": "2026-09-23T12:36:58+00:00",
+  "aliases": []
  }
 }

@@ -2,7 +2,7 @@
  "internal_baseline_simple": 0.07194281550156773,
  "internal_baseline_lucene": 0.07057343388257126,
  "official_reference": 0.0879,
- "target": 0.3,
+ "official_reference_dev": 0.0967,
  "n_topics": 1211,
  "gate": "passed: rankings identical to starter kit bm25.py on iota"
 }
