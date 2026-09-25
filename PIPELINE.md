@@ -14,7 +14,10 @@ Tài liệu này trả lời bốn câu hỏi:
 | Mục tiêu | Nội dung | Đo bằng |
 | --- | --- | --- |
 | A | Đủ sáu hạng mục của đề cương | Bảng đối chiếu ở Phần 3 |
-| B | Điểm cao trên bảng xếp hạng (~0,30) | nDCG@10 |
+| B | Vượt mốc BM25 chính thức càng xa càng tốt | nDCG@10, cùng tập `train` |
+
+Mục tiêu B không đặt theo một điểm số tuyệt đối. Lý do ghi ở Phần 7: cuộc thi
+chưa chạy nên chưa có bảng xếp hạng để nhắm vào.
 
 Hai mục tiêu kéo về hai hướng khác nhau:
 
@@ -110,7 +113,7 @@ Mục 9 của `06b` cần `results/runs/` đã có sẵn, tức là cần mục 
 | Hiện tại | Đủ hạng mục 1 tới 6 trên tập `train` |
 | `07a` | Thêm vào đó một chặng khử trùng lặp đã đo, vẫn chỉ cần CPU |
 | `07b` | Đủ đề cương và có kết quả tốt |
-| `07d` | Đủ điều kiện nhắm top 3 |
+| `07d` | Hệ thống đầy đủ bốn chặng, khai thác hết trần đã đo |
 | `08` | Số liệu trên `dev` và bài nộp đóng gói xong |
 
 `08` chạy được ngay sau bất kỳ mốc nào ở trên: nó lấy hệ thống cao điểm nhất
@@ -398,14 +401,17 @@ Kết quả này đảo ngược dự đoán ban đầu. Trước khi đo, hư�
 hiểu ngữ nghĩa. Số liệu cho thấy xếp hạng lại rẻ hơn một bậc độ lớn mà trần lại
 cao hơn.
 
-**2. Mục tiêu 0,30 nằm trong trần đã đo.**
+**2. Còn rất nhiều khoảng trống để lấy.**
 
 ```text
 hiện tại     0,1867
-mục tiêu     0,30      ← cần thu 29,4% khoảng trống ở độ sâu 100
-trần@100     0,5718                24,4% ở độ sâu 200
-trần@200     0,6539
+trần@100     0,5718    ← còn 0,3851, đã thu được 23,0% quãng đường
+trần@200     0,6539    ← còn 0,4672, đã thu được 19,3%
+trần@1000    0,7296    ← còn 0,5429, đã thu được 17,2%
 ```
+
+Khoảng trống này là thứ đo được, khác với một mục tiêu điểm số tự đặt. Mỗi
+chặng thêm vào được đánh giá theo phần khoảng trống nó thu về.
 
 **3. Gộp hai mô hình không hơn lấy sâu gấp đôi.**
 
@@ -421,6 +427,20 @@ Chênh 0,0022, trong mức nhiễu. Theo nguyên tắc hoà thì chọn cái đ�
 
 ## Phần 7 — Hiện trạng và mục tiêu
 
+### Hệ quy chiếu
+
+Mọi con số ở phần này là nDCG@10 trên tập `train`, chấm bằng `pytrec_eval` với
+`ndcg_cut_10` rồi lấy trung bình theo 13 nhóm. Có ba tập câu hỏi, và số của tập
+này không so trực tiếp được với tập kia:
+
+| Tập | Số câu | Ai chấm | Dùng khi nào |
+| --- | --- | --- | --- |
+| `train` | 1.211 | tự chấm, không giới hạn số lần | mọi thử nghiệm |
+| `dev` | 519 | tự chấm | một lần duy nhất, ở `08` |
+| test ẩn | chưa phát hành | ban tổ chức | ngày nộp bài |
+
+### Mốc trên `train`
+
 | Mốc | nDCG@10 |
 | --- | --- |
 | Hệ thống cơ sở | 0,0719 |
@@ -428,10 +448,37 @@ Chênh 0,0022, trong mức nhiễu. Theo nguyên tắc hoà thì chọn cái đ�
 | Sau `03a` | 0,1463 |
 | `qlm` (`mu` = 1000) | 0,1839 |
 | **Hiện tại** (`k1=2,0  b=0,9`) | **0,1867** |
-| Mục tiêu top 3 | ~0,30 |
 
 Hai dòng cuối chênh nhau 0,0028 và chưa chạy kiểm định, nên tạm coi là hoà.
 Việc chốt tầng một ghi ở Phần 11.
+
+### Tại sao không có dòng "mục tiêu"
+
+Các bản trước của tài liệu này có một dòng ghi "mục tiêu top 3 — khoảng 0,30".
+Dòng đó đã bị gỡ vì không có nguồn.
+
+Cuộc thi chưa chạy. Dữ liệu phát hành ngày 30/08/2026; mục tin tức của
+`RETECO/README.md` ghi phần tiếp theo là đăng ký, danh sách thư và nền tảng thi
+đấu. Chưa có bảng xếp hạng, chưa ai nộp gì, nên không ai biết bao nhiêu điểm
+thì vào nhóm dẫn đầu. Con số 0,30 là giả định viết vào `02` từ đầu dự án rồi
+được các tài liệu sau chép lại.
+
+Ba đại lượng thay thế, đều có thật và đo được:
+
+| Đại lượng | Hiện tại |
+| --- | --- |
+| Tỷ lệ so với BM25 chính thức, cùng `train` | **2,12×** |
+| Số nhóm thắng mốc chính thức | **12 / 13**, chỉ thua `politics` |
+| Phần khoảng trống tới trần@100 đã thu | **23,0%** |
+
+Mốc so sánh lấy từ `RETECO/starter_kit/BASELINE_RESULTS.md`: BM25 chính thức
+đạt 0,0879 trên `train`, 0,0967 trên `dev`, và 0,108 trên toàn bộ tập theo bài
+báo TEMPO.
+
+**Ước lượng trên `dev`.** Chính baseline chính thức chạy cao hơn 10% trên `dev`
+so với `train` (0,0967 / 0,0879 = 1,100). Nếu hệ thống này giữ cùng tỷ lệ đó
+thì 0,1890 trên `train` tương ứng khoảng **0,21 trên `dev`**. Đây là ngoại suy,
+và `08` sẽ đo thật.
 
 ### Ước lượng lộ trình
 
@@ -442,8 +489,9 @@ Việc chốt tầng một ghi ở Phần 11.
 | + xếp hạng lại độ sâu 1000 | 0,30–0,37 | trần ≥ 0,730, thu 20–30% |
 | + mô hình ngữ nghĩa | 0,32–0,39 | bù phần 0,7% ngoài tầm với |
 
-Ước lượng, không phải cam kết. Phần trong ngoặc là tỷ lệ khoảng trống thu được,
-và đó mới là ẩn số thật.
+Ước lượng, không phải cam kết, và cũng không phải mục tiêu. Phần trong ngoặc là
+tỷ lệ khoảng trống thu được, và đó mới là ẩn số thật: khoảng 25–40% là mức
+thường thấy trong tài liệu về bộ xếp hạng lại, chứ chưa đo trên bộ dữ liệu này.
 
 ---
 

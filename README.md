@@ -108,7 +108,7 @@ Họ công thức BM mà đề cương nhắc tới nằm trong cùng một lư�
 | Cấu trúc dữ liệu cho chỉ mục | xong | `06a` mục 1, 3 |
 | Thuật toán lập chỉ mục: từ điển và posting | xong | `06a` mục 3, 4 |
 | Số liệu: TF, IDF, chiều dài tài liệu | xong | `06a` mục 3 |
-| Số liệu: xác suất term | xong | `04` mục 11 — `p(t|C)` của Dirichlet |
+| Số liệu: xác suất term | xong | `04` mục 11 — `p(t\|C)` của Dirichlet |
 | Thuật toán xử lý câu truy vấn | xong | `06a` mục 5 |
 | Xử lý câu truy vấn boolean | xong | `04` mục 1, 6 |
 | Vị trí term | bỏ qua | Lý do ghi ở `06a` mục 8 |
@@ -163,6 +163,22 @@ Cả ba mục đều có bộ nhớ đệm riêng, nên chạy lần thứ hai c
 
 ## 4. Các mốc điểm
 
+### Hệ quy chiếu
+
+Mọi con số dưới đây đều là nDCG@10, chấm bằng `pytrec_eval` với `ndcg_cut_10`
+rồi lấy trung bình theo 13 nhóm. Cùng một độ đo nhưng có ba tập câu hỏi khác
+nhau, và số của tập này không so trực tiếp được với tập kia:
+
+| Tập | Số câu | Ai chấm | Dùng khi nào |
+| --- | --- | --- | --- |
+| `train` | 1.211 | tự chấm, chạy bao nhiêu lần cũng được | mọi thử nghiệm |
+| `dev` | 519 | tự chấm | một lần duy nhất, ở `08` |
+| test ẩn | chưa phát hành | ban tổ chức | ngày nộp bài |
+
+Trừ khi ghi rõ, mọi số trong kho này thuộc hệ `train`.
+
+### Mốc trên `train`
+
 | Mốc | nDCG@10 | Ghi chú |
 | --- | --- | --- |
 | Hệ thống cơ sở | 0,0719 | Điểm xuất phát |
@@ -172,9 +188,60 @@ Cả ba mục đều có bộ nhớ đệm riêng, nên chạy lần thứ hai c
 | **Hiện tại** (`05`) | **0,1890** | Gấp 2,15 lần mốc chính thức |
 | Trần nếu xếp hạng lại độ sâu 100 | 0,5718 | |
 | Trần nếu xếp hạng lại độ sâu 200 | 0,6539 | |
-| Mục tiêu | ~0,30 | Mức nhóm dẫn đầu |
 
-Mốc 0,0879 lấy từ `RETECO/starter_kit/BASELINE_RESULTS.md`.
+Mốc 0,0879 lấy từ `RETECO/starter_kit/BASELINE_RESULTS.md`. Cùng file đó ghi
+BM25 chính thức đạt 0,0967 trên `dev` và 0,108 trên toàn bộ tập theo bài báo
+TEMPO.
+
+### Về mục tiêu điểm số
+
+Cuộc thi chưa chạy. Dữ liệu phát hành ngày 30/08/2026, và mục tin tức của
+`RETECO/README.md` ghi phần tiếp theo là đăng ký, danh sách thư và nền tảng thi
+đấu. Chưa có bảng xếp hạng, chưa có bài nộp nào, nên **không có căn cứ nào để
+nói bao nhiêu điểm thì vào nhóm dẫn đầu**. Các bản trước của tài liệu này ghi
+mục tiêu ~0,30 là "mức nhóm dẫn đầu"; con số đó là giả định tự đặt từ đầu dự
+án, không có nguồn, và đã được gỡ bỏ.
+
+Thay vào đó dự án theo dõi ba đại lượng có thật:
+
+| Đại lượng | Hiện tại | Ý nghĩa |
+| --- | --- | --- |
+| Tỷ lệ so với BM25 chính thức, cùng `train` | **2,15×** | mốc duy nhất công bố được |
+| Số nhóm thắng mốc chính thức | **12 / 13** | chỉ thua `politics` |
+| Phần khoảng trống tới trần đã thu | 23% của trần@100 | còn 0,385 để lấy |
+
+Ước lượng trên `dev`: chính baseline chính thức chạy cao hơn 10% trên `dev` so
+với `train` (0,0967 / 0,0879 = 1,100). Nếu hệ thống này giữ cùng tỷ lệ đó thì
+0,1890 trên `train` tương ứng khoảng **0,21 trên `dev`**.
+
+### Đối chiếu từng nhóm, cùng hệ quy chiếu
+
+BM25 chính thức và `bm25_tuned` của dự án, cả hai trên `train`:
+
+| Nhóm | Chính thức | Dự án | Gấp |
+| --- | --- | --- | --- |
+| iota | 0,0199 | 0,2656 | 13,35× |
+| quant | 0,0255 | 0,1436 | 5,63× |
+| monero | 0,0278 | 0,1078 | 3,88× |
+| economics | 0,0382 | 0,1339 | 3,51× |
+| travel | 0,0429 | 0,1432 | 3,34× |
+| history | 0,0691 | 0,2046 | 2,96× |
+| workplace | 0,0777 | 0,2126 | 2,74× |
+| genealogy | 0,1003 | 0,2169 | 2,16× |
+| law | 0,0943 | 0,1996 | 2,12× |
+| bitcoin | 0,0695 | 0,1318 | 1,90× |
+| cardano | 0,1349 | 0,2181 | 1,62× |
+| hsm | 0,1627 | 0,2133 | 1,31× |
+| politics | 0,2792 | 0,2355 | **0,84×** |
+| **Trung bình theo nhóm** | **0,0878** | **0,1867** | **2,12×** |
+
+Cột "chính thức" lấy từ bảng `Per-domain nDCG@10 · Track 1 · TEMPO`, cột
+`1a train` của `RETECO/starter_kit/BASELINE_RESULTS.md`. Cột "dự án" lấy từ
+`notebooks/results/scores/f326339da67a.json`, hệ thống `bm25_tuned`, đủ
+1.211/1.211 câu.
+
+`politics` là nhóm duy nhất thua, và cũng là nhóm mốc chính thức mạnh nhất.
+Đó là manh mối cụ thể đáng đào tiếp.
 
 ---
 
@@ -219,6 +286,7 @@ RETECO/                           Bộ công cụ ban tổ chức (không commit
 | `pipeline.py` | Ghép chặng, lưu kết quả, so sánh, xuất bài nộp |
 | `gpu_worker.py` | Chạy trên máy có GPU, độc lập với phần còn lại |
 | `report.py` | Sinh trang so sánh `results/report.html` |
+| `run_candidates.py` | Chạy hết ứng viên trong `systems/` rồi so sánh |
 
 Lộ trình và việc còn lại: xem [`PIPELINE.md`](PIPELINE.md).
 
@@ -294,6 +362,50 @@ h = P.run("systems/01_bm25_tuned.json")     # chay lai, cache thi bo qua
 P.score(h)
 P.compare(h_a, h_b, part="fit")             # kiem dinh bootstrap
 ```
+
+### Chọn vài ứng viên rồi so sánh
+
+Một ứng viên là một file JSON trong `systems/`. Chạy hết và so sánh bằng một
+lệnh:
+
+```bash
+python src/run_candidates.py                        # chay het systems/*.json
+python src/run_candidates.py 01 02 04               # chi vai file
+python src/run_candidates.py --against bm25_tuned   # kem kiem dinh
+python src/run_candidates.py --report               # roi mo trang so sanh
+```
+
+Lệnh này in ba bảng, mỗi bảng trả lời một câu khác nhau:
+
+| Bảng | Trả lời |
+| --- | --- |
+| `table` | Ai cao nhất trên `fit`, và có trả lời đủ câu không |
+| `metrics` | P@10, R@10, F1@10, MAP, nDCG@10, R@100 |
+| `--against` | Chênh lệch có thật không, hay chỉ là nhiễu |
+
+Chạy lại một ứng viên đã chạy thì miễn phí: mã băm của cấu hình là khoá bộ nhớ
+đệm, nên lần sau đọc lại danh sách đã lưu.
+
+**Ba điều kiện để chọn bài nộp**, theo đúng thứ tự:
+
+1. Trả lời đủ 1.211 câu. Bộ chấm bỏ qua câu không có kết quả thay vì cho 0
+   điểm, nên một hệ thống trả lời thiếu có thể *trông* cao điểm hơn.
+2. Cao nhất trên phần `fit`.
+3. Hơn hệ thống đơn giản hơn nó một cách có ý nghĩa thống kê. Hoà thì chọn cái
+   đơn giản hơn.
+
+Đọc `check` **sau khi** đã chọn, một lần, để xem lựa chọn có bị khớp vào riêng
+phần `fit` hay không. Sắp xếp theo `check` rồi chọn theo nó là tự phá mất ý
+nghĩa của nó.
+
+Bốn ứng viên chạy được ngay, không cần GPU, đã có sẵn trong `systems/`:
+
+| File | Vì sao đáng đo |
+| --- | --- |
+| `02_qlm.json` | `04` mục 11 cho 0,1839 nhưng chưa từng qua khung này |
+| `03_bm25_best_ndcg.json` | Ô cao điểm nhất của lưới `05`, `k1`=1,5 `b`=0,75 |
+| `04_bm25_tuned_deep.json` | Cấu hình đã chốt, lấy sâu 1000 |
+| `05_qlm_deep.json` | Cùng độ sâu với trên, để so hai mô hình cùng ngân sách |
 
 ### Thêm một hệ thống mới
 
